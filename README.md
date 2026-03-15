@@ -51,7 +51,7 @@ Here you can download and use applications selected for this repository, which a
 - This project is **not affiliated with any patch creators mentioned here**, and is intended for educational & personal use only.
 - All builds are created using **publicly available tools**. This repository simply automates the process for convenience.
 - The entire process is handled via **public GitHub Actions** to ensure security and transparency. For maximum security, you can always build the applications yourself using the provided source code or official methods.
-- The build code is a **heavily refactored, optimized, and customized** version of the original implementation by **j-hc**. It has been strictly modified to exclusively support Morphe patches (`.mpp`). Full credit for the initial groundwork goes to him.
+- The build code is a **heavily refactored, optimized, and customized** version of the original implementation by *[j-hc](https://github.com/j-hc)*. It has been strictly modified to exclusively support Morphe patches (`.mpp`). Full credit for the initial groundwork goes to him.
 - This repository only provides pre-built APKs. If a build fails due to upstream app or patch changes, please report it to the patch creators or wait for an update.
 
 ---
