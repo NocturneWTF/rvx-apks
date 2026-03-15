@@ -3,13 +3,14 @@
 TEMP_DIR="temp"
 BIN_DIR="bin"
 BUILD_DIR="build"
-if [ "${GITHUB_TOKEN-}" ]; then GH_HEADER="Authorization: token ${GITHUB_TOKEN}"; else GH_HEADER=; fi
+GH_HEADER=""
+[[ -n "${GITHUB_TOKEN-}" ]] && GH_HEADER="Authorization: token ${GITHUB_TOKEN}"
 
 toml_prep() {
 	[[ -f "$1" ]] || return 1
 	case "${1##*.}" in
-		toml) __TOML__=$("$TOML" --output json --file "$1" .) ;;
-		json) __TOML__=$(<"$1") ;;
+		toml) __TOML__="$("$TOML" --output json --file "$1" .)" ;;
+		json) __TOML__="$(<"$1")" ;;
 		*) abort "config extension not supported" ;;
 	esac
 }
@@ -17,27 +18,28 @@ toml_get_table_names() { jq -r -e 'to_entries[] | select(.value | type == "objec
 toml_get_table_main() { jq -r -e 'to_entries | map(select(.value | type != "object")) | from_entries' <<<"$__TOML__"; }
 toml_get_table() { jq -r -e ".\"${1}\"" <<<"$__TOML__"; }
 toml_get() {
-	local op quote_placeholder=$'\001'
-	op=$(jq -r ".\"${2}\" | values" <<<"$1")
-	if [ "$op" ]; then
-		op="${op#"${op%%[![:space:]]*}"}"
-		op="${op%"${op##*[![:space:]]}"}"
-		op=${op//\\\'/$quote_placeholder}
-		op=${op//"''"/$quote_placeholder}
-		op=${op//"'"/'"'}
-		op=${op//$quote_placeholder/$'\''}
-		echo "$op"
-	else return 1; fi
+	local op qp=$'\001'
+	op="$(jq -r ".\"${2}\" | values" <<<"$1")"
+	[[ -z "$op" ]] && return 1
+	op="${op#"${op%%[![:space:]]*}"}"
+	op="${op%"${op##*[![:space:]]}"}"
+	op="${op//\\\'/$qp}"
+	op="${op//"''"/$qp}"
+	op="${op//"'"/'"'}"
+	op="${op//$qp/$'\''}"
+	echo "$op"
 }
 
 pr() { echo >&2 -e "\033[0;32m[+] ${1}\033[0m"; }
 epr() {
 	echo >&2 -e "\033[0;31m[-] ${1}\033[0m"
-	if [ "${GITHUB_REPOSITORY-}" ]; then echo >&2 -e "::error::utils.sh [-] ${1}\n"; fi
+	[[ -n "${GITHUB_REPOSITORY-}" ]] && echo >&2 -e "::error::utils.sh [-] ${1}\n"
+	return 0
 }
 wpr() {
 	echo >&2 -e "\033[0;33m[!] ${1}\033[0m"
-	if [ "${GITHUB_REPOSITORY-}" ]; then echo >&2 -e "::warning::utils.sh [!] ${1}\n"; fi
+	[[ -n "${GITHUB_REPOSITORY-}" ]] && echo >&2 -e "::warning::utils.sh [!] ${1}\n"
+	return 0
 }
 abort() {
 	epr "ABORT: ${1-}"
@@ -46,48 +48,46 @@ abort() {
 java() { command java "$@"; }
 
 install_pkg() {
-	local cmd=$1 pkg=${2:-$1}
+	local cmd="$1" pkg="${2:-$1}"
 	command -v "$cmd" >/dev/null 2>&1 && return 0
 	pr "Installing $pkg..."
 
 	local -a managers=("apt-get:install -y" "dnf:install -y" "yum:install -y" "pacman:-S --noconfirm" "apk:add")
 	local pm args
 	for entry in "${managers[@]}"; do
-		pm="${entry%%:*}" args="${entry#*:}"
+		pm="${entry%%:*}"
 		if command -v "$pm" >/dev/null 2>&1; then
-			sudo "$pm" "$args" "$pkg"
-			command -v "$cmd" >/dev/null 2>&1 || abort "Failed to install $pkg"
-			return
+			read -r -a args <<<"${entry#*:}"
+			sudo "$pm" "${args[@]}" "$pkg"
+			break
 		fi
 	done
 	command -v "$cmd" >/dev/null 2>&1 || abort "Failed to install $pkg"
 }
 
 get_prebuilts() {
-	local cli_src=$1 cli_ver=$2 patches_src=$3 patches_ver=$4
-	local cl_dir=${patches_src%/*}
+	local cli_src="$1" cli_ver="$2" patches_src="$3" patches_ver="$4"
+	local cl_dir="${patches_src%/*}"
 	pr "Getting prebuilts (${cl_dir})"
-	cl_dir=${TEMP_DIR}/${cl_dir,,}-uni
-	[ -d "$cl_dir" ] || mkdir "$cl_dir"
+	cl_dir="${TEMP_DIR}/${cl_dir,,}"
+	mkdir -p "$cl_dir"
 
 	for src_ver in "$cli_src CLI $cli_ver cli" "$patches_src Patches $patches_ver patches"; do
-		set -- $src_ver
-		local src=$1 tag=$2 ver=${3-} fprefix=$4
+		local src tag ver fprefix
+		read -r src tag ver fprefix <<<"$src_ver"
 
-		local grab_cl=false
-		[ "$tag" = "Patches" ] && grab_cl=true
+		local grab_cl="false"
+		[[ "$tag" == "Patches" ]] && grab_cl="true"
 
-		local dir=${src%/*}
-		dir=${TEMP_DIR}/${dir,,}-uni
-		[ -d "$dir" ] || mkdir "$dir"
+		local dir="${src%/*}"
+		dir="${TEMP_DIR}/${dir,,}"
+		mkdir -p "$dir"
 
 		local uni_rel="https://api.github.com/repos/${src}/releases" name_ver
-		if [ "$ver" = "dev" ]; then
-			local resp
-			resp=$(gh_req "$uni_rel" -) || return 1
-			ver=$(jq -e -r '.[] | .tag_name' <<<"$resp" | get_highest_ver) || return 1
+		if [[ "$ver" == "dev" ]]; then
+			ver="$(gh_req "$uni_rel" - | jq -e -r '.[] | .tag_name' | get_highest_ver)" || return 1
 		fi
-		if [ "$ver" = "latest" ]; then
+		if [[ "$ver" == "latest" ]]; then
 			uni_rel+="/latest"
 			name_ver="*"
 		else
@@ -95,26 +95,29 @@ get_prebuilts() {
 			name_ver="$ver"
 		fi
 
+		local ext="jar"
+		[[ "$tag" == "Patches" ]] && ext="mpp"
+
 		local url file tag_name matches count
-		file=$(find "$dir" -name "*${fprefix}-${name_ver#v}.*" -type f 2>/dev/null)
-		if [ -z "$file" ]; then
+		file="$(find "$dir" -name "*${fprefix}-${name_ver#v}.${ext}" -type f 2>/dev/null)"
+		if [[ -z "$file" ]]; then
 			local resp name
-			resp=$(gh_req "$uni_rel" -) || return 1
-			tag_name=$(jq -r '.tag_name' <<<"$resp")
-			matches=$(jq -e '.assets | map(select(.name | endswith("asc") | not))' <<<"$resp")
-			count=$(jq 'length' <<<"$matches")
-			if [ "$count" -gt 1 ]; then
+			resp="$(gh_req "$uni_rel" -)" || return 1
+			tag_name="$(jq -r '.tag_name' <<<"$resp")"
+			matches="$(jq -e ".assets | map(select(.name | endswith(\".${ext}\")))" <<<"$resp")"
+			count="$(jq 'length' <<<"$matches")"
+			if (( count > 1 )); then
 				local matches_new
-				matches_new=$(jq -e -r 'map(select(.name | contains("-dev") | not))' <<<"$matches")
-				if [ "$(jq 'length' <<<"$matches_new")" -eq 1 ]; then
-					matches=$matches_new
+				matches_new="$(jq -e -r 'map(select(.name | contains("-dev") | not))' <<<"$matches")"
+				if (( $(jq 'length' <<<"$matches_new") == 1 )); then
+					matches="$matches_new"
 					count=1
 				fi
 			fi
-			if [ "$count" -eq 0 ]; then
+			if (( count == 0 )); then
 				epr "No asset was found"
 				return 1
-			elif [ "$count" -ne 1 ]; then
+			elif (( count != 1 )); then
 				wpr "More than 1 asset was found for this release. Falling back to the first one found..."
 			fi
 			read -r url name < <(jq -r '.[0] | "\(.url)\t\(.name)"' <<<"$matches")
@@ -122,20 +125,18 @@ get_prebuilts() {
 			gh_dl "$file" "$url" >&2 || return 1
 			echo "> ⚙️ » $tag: \`$(cut -d/ -f1 <<<"$src")/${name}\`  " >>"${cl_dir}/changelog.md"
 		else
-			grab_cl=false
-			local for_err=$file
-			if [ "$ver" = "latest" ]; then
-				file=$(grep -v '/[^/]*dev[^/]*$' <<<"$file" | head -1)
-			else file=$(grep "/[^/]*${ver#v}[^/]*\$" <<<"$file" | head -1); fi
-			if [ -z "$file" ]; then abort "filter fail: '$for_err' with '$ver'"; fi
-			name=$(basename "$file")
-			tag_name=$(cut -d'-' -f3- <<<"$name")
-			tag_name=v${tag_name%.*}
+			grab_cl="false"
+			if [[ "$ver" == "latest" ]]; then
+				file="$(grep -m 1 -v '/[^/]*dev[^/]*$' <<<"$file")"
+			else
+				file="$(grep -m 1 "/[^/]*${ver#v}[^/]*\$" <<<"$file")"
+			fi
+			[[ -z "$file" ]] && abort "filter fail: '$file' with '$ver'"
+			name="${file##*/}"
+			tag_name="v${name#*-*-}"
+			tag_name="${tag_name%.*}"
 		fi
-
-		if [ "$tag" = "Patches" ] && [ $grab_cl = true ]; then
-			echo -e "[🔗 » Changelog](https://github.com/${src}/releases/tag/${tag_name})\n" >>"${cl_dir}/changelog.md"
-		fi
+		[[ "$tag" == "Patches" && "$grab_cl" == "true" ]] && echo -e "[🔗 » Changelog](https://github.com/${src}/releases/tag/${tag_name})\n" >>"${cl_dir}/changelog.md"
 		echo -n "$file "
 	done
 	echo
@@ -148,411 +149,363 @@ set_prebuilts() {
 }
 
 _req() {
-	local ip="$1" op="$2"
+	local ip="$1" op="$2" dlp=""
 	shift 2
-	local curl_args=(-L -c "$TEMP_DIR/cookie.txt" -b "$TEMP_DIR/cookie.txt" --connect-timeout 5 --retry 0 --fail -s -S "$@" "$ip")
-	if [ "$op" = - ]; then
-		if ! curl "${curl_args[@]}"; then
-			epr "Request failed: $ip"
-			return 1
+	local cookie="$TEMP_DIR/cookie.txt"
+	local curl_args=(-L -c "$cookie" -b "$cookie" --connect-timeout 5 --retry 0 --fail -s -S "$@" "$ip")
+	if [[ "$op" != "-" ]]; then
+		[[ -f "$op" ]] && return 0
+		dlp="${op%/*}/tmp.${op##*/}"
+		if [[ -f "$dlp" ]]; then
+			while [[ -f "$dlp" ]]; do sleep 1; done
+			return 0
 		fi
-	else
-		if [ -f "$op" ]; then return; fi
-		local dlp
-		dlp="$(dirname "$op")/tmp.$(basename "$op")"
-		if [ -f "$dlp" ]; then
-			while [ -f "$dlp" ]; do sleep 1; done
-			return
-		fi
-		if ! curl "${curl_args[@]}" -o "$dlp"; then
-			epr "Request failed: $ip"
-			return 1
-		fi
-		mv -f "$dlp" "$op"
+		curl_args+=(-o "$dlp")
 	fi
+
+	curl "${curl_args[@]}" || { epr "Request failed: $ip"; return 1; }
+	[[ -z "$dlp" ]] && return 0
+	mv -f "$dlp" "$op"
 }
 ua() {
 	local ver
-	ver=$(curl -sf "https://product-details.mozilla.org/1.0/firefox_versions.json" | jq -re '.LATEST_FIREFOX_VERSION') || ver="148.0"
+	ver="$(curl -sf "https://product-details.mozilla.org/1.0/firefox_versions.json" | jq -re '.LATEST_FIREFOX_VERSION')" || ver="148.0"
 	echo "Mozilla/5.0 (X11; Linux x86_64; rv:${ver%%.*}.0) Gecko/20100101 Firefox/${ver%%.*}.0"
 }
 req() {
-	if [ -z "${_UA:-}" ]; then _UA=$(ua); fi
+	[[ -z "${_UA:-}" ]] && _UA="$(ua)"
 	_req "$1" "$2" --http2 --tlsv1.3 -A "$_UA"
 }
 gh_req() { _req "$1" "$2" -H "$GH_HEADER"; }
 gh_dl() {
-	if [ ! -f "$1" ]; then
-		pr "Getting '$1' from '$2'"
-		_req "$2" "$1" -H "$GH_HEADER" -H "Accept: application/octet-stream"
-	fi
+	[[ -f "$1" ]] && return 0
+	pr "Getting '$1' from '$2'"
+	_req "$2" "$1" -H "$GH_HEADER" -H "Accept: application/octet-stream"
 }
 
-log() { echo -e "$1  " >>"build.md"; }
+log() { echo -e "$1" >>"build.md"; }
 get_highest_ver() {
-	local vers m
-	vers=$(tee)
-	m=$(head -1 <<<"$vers")
-	if ! semver_validate "$m"; then echo "$m"; else sort -rV <<<"$vers" | head -1; fi
+	local vers
+	vers="$(cat)"
+	if semver_validate "${vers%%$'\n'*}"; then sort -rV <<<"$vers" | head -n 1
+	else head -n 1 <<<"$vers"; fi
 }
 semver_validate() {
-    local a="${1%-*}"
-    a="${a#v}"
-    [ -z "${a//[.0-9]/}" ]
+	local a="${1%-*}"
+	a="${a#v}"
+	[[ -z "${a//[.0-9]/}" ]]
 }
 get_patch_last_supported_ver() {
-	local list_patches=$1 pkg_name=$2 inc_sel=$3 _exc_sel=$4 _exclusive=$5 # TODO: resolve using all of these
-	local op pcount av_apps
-	if [ "$inc_sel" ]; then
-		if ! op=$(awk '{$1=$1}1' <<<"$list_patches"); then
-			epr "list-patches: '$op'"
-			return 1
-		fi
-		local ver vers="" NL=$'\n'
+	local list_patches="$1" pkg_name="$2" inc_sel="$3" _exc_sel="$4" _exclusive="$5" # TODO: resolve using all of these
+	local op pcount
+	if [[ -n "$inc_sel" ]]; then
+		local ver vers=""
 		while IFS= read -r line; do
+			[[ -z "$line" ]] && continue
 			line="${line:1:${#line}-2}"
-			ver=$(sed -n "/^Name: $line\$/,/^\$/p" <<<"$op" | sed -n "/^Compatible versions:\$/,/^\$/p" | tail -n +2)
-			vers=${ver}${NL}
-		done <<<"$(list_args "$inc_sel")"
-		vers=$(awk '{$1=$1}1' <<<"$vers")
-		if [ "$vers" ]; then
-			get_highest_ver <<<"$vers"
-			return
-		fi
+			ver="$(sed -n "/^Name: $line\$/,/^\$/p" <<<"$list_patches" | sed -n "/^Compatible versions:\$/,/^\$/p" | tail -n +2)"
+			vers+="${ver}"$'\n'
+		done < <(list_args "$inc_sel")
+		vers="$(awk '{$1=$1}1' <<<"$vers")"
+		[[ -n "$vers" ]] && { get_highest_ver <<<"$vers"; return 0; }
 	fi
-	op=$(java -jar "$cli_jar" list-versions "$patches_jar" -f "$pkg_name" 2>&1 | tail -n +3 | awk '{$1=$1}1')
-	if [ "$op" = "Any" ]; then return; fi
-	pcount=$(head -1 <<<"$op") pcount=${pcount#*(} pcount=${pcount% *}
-	if [ -z "$pcount" ]; then
-		av_apps=$(java -jar "$cli_jar" list-versions "$patches_jar" 2>&1 | awk '/Package name:/ { printf "%s\x27%s\x27", sep, $NF; sep=", " } END { print "" }')
-		abort "No patch versions found for '$pkg_name' in this patches source!\nAvailable applications found: $av_apps"
+	op="$(patches_list_versions "$cli_jar" "$patches_mpp" "$pkg_name")" || return 1
+	op="$(tail -n +3 <<<"$op" | awk '{$1=$1}1')"
+	[[ "$op" == "Any" ]] && return 0
+	pcount="$(head -n 1 <<<"$op")" pcount="${pcount#*(}" pcount="${pcount% *}"
+	if [[ -z "$pcount" ]]; then
+		abort "No patches found for '$pkg_name' in patches '$patches_mpp'"
 	fi
 	grep -F "($pcount patch" <<<"$op" | sed 's/ (.* patch.*//' | get_highest_ver || return 1
 }
 
+patches_list_versions() {
+	local cli_jar="$1" patches_mpp="$2" pkg_name="$3" op
+	op="$(java -jar "$cli_jar" list-versions "$patches_mpp" -f "$pkg_name" 2>&1)" || { epr "Could not list versions $cli_jar: '$op'"; return 1; }
+	echo "$op"
+}
+patches_list() {
+	local cli_jar="$1" patches_mpp="$2" pkg_name="$3" op
+	op="$(java -jar "$cli_jar" list-patches --patches "$patches_mpp" -f "$pkg_name" -v -p 2>&1)" || { epr "Could not get patches list $cli_jar: '$op'"; return 1; }
+	echo "$op"
+}
+
 isoneof() {
-	local i=$1 v
+	local i="$1" v
 	shift
-	for v; do [ "$v" = "$i" ] && return 0; done
+	for v; do [[ "$v" == "$i" ]] && return 0; done
 	return 1
 }
 
 # -------------------- apkmirror --------------------
 apkmirror_search() {
 	local resp="$1" dpi="$2" arch="$3" apk_bundle="$4"
-	local apparch dlurl="" node app_table emptyCheck
-	if [ "$arch" = all ]; then
-		apparch=(universal noarch 'arm64-v8a + armeabi-v7a')
-	else apparch=("$arch" universal noarch 'arm64-v8a + armeabi-v7a'); fi
+	local -a apparch=(universal noarch 'arm64-v8a + armeabi-v7a')
+	local dlurl="" node
+	[[ "$arch" != "all" ]] && apparch=("$arch" "${apparch[@]}")
 	for ((n = 1; n < 40; n++)); do
-		node=$($HTMLQ "div.table-row.headerFont:nth-last-child($n)" -r "span:nth-child(n+3)" <<<"$resp")
-		if [ -z "$node" ]; then break; fi
-		emptyCheck=$($HTMLQ -t -w "div.table-cell:nth-child(1) > a:nth-child(1)" <<<"$node" | xargs)
-		if [ "$emptyCheck" ]; then
-			dlurl=$($HTMLQ --base https://www.apkmirror.com --attribute href "div:nth-child(1) > a:nth-child(1)" <<<"$node")
-		else break; fi
-		app_table=$($HTMLQ --text --ignore-whitespace <<<"$node")
-		if [ "$(sed -n 3p <<<"$app_table")" = "$apk_bundle" ] &&
-			[ "$(sed -n 6p <<<"$app_table")" = "$dpi" ] &&
-			isoneof "$(sed -n 4p <<<"$app_table")" "${apparch[@]}"; then
+		node="$($HTMLQ "div.table-row.headerFont:nth-last-child($n)" -r "span:nth-child(n+3)" <<<"$resp")"
+		[[ -z "$node" ]] && break
+		dlurl="$($HTMLQ --base https://www.apkmirror.com --attribute href "div.table-cell:nth-child(1) > a:nth-child(1)" <<<"$node")"
+		[[ -z "$dlurl" ]] && break
+		mapfile -t lines <<<"$($HTMLQ --text --ignore-whitespace <<<"$node")"
+		if [[ "${lines[2]}" == "$apk_bundle" && "${lines[5]}" == "$dpi" ]] && isoneof "${lines[3]}" "${apparch[@]}"; then
 			echo "$dlurl"
 			return 0
 		fi
 	done
-	if [ "$n" -eq 2 ] && [ "$dlurl" ]; then
-		# only one apk exists, return it
-		echo "$dlurl"
-		return 0
-	fi
+	(( n == 2 )) && [[ -n "$dlurl" ]] && { echo "$dlurl"; return 0; }
 	return 1
 }
 dl_apkmirror() {
-	local url=$1 version=${2// /-} output=$3 arch=$4 dpi=$5 is_bundle=false
-	if [ -f "${output}.apkm" ]; then
-		is_bundle=true
-	else
-		if [ "$arch" = "arm-v7a" ]; then arch="armeabi-v7a"; fi
-		local resp node apkmname dlurl=""
-		apkmname=$($HTMLQ "h1.marginZero" --text <<<"$__APKMIRROR_RESP__")
-		apkmname="${apkmname,,}" apkmname="${apkmname// /-}" apkmname="${apkmname//[^a-z0-9-]/}"
-		url="${url}/${apkmname}-${version//./-}-release/"
-		resp=$(req "$url" -) || return 1
-		node=$($HTMLQ "div.table-row.headerFont:nth-last-child(1)" -r "span:nth-child(n+3)" <<<"$resp")
-		if [ "$node" ]; then
-			for current_dpi in $dpi; do
-				for type in APK BUNDLE; do
-					if dlurl=$(apkmirror_search "$resp" "$current_dpi" "${arch}" "$type"); then
-						[[ "$type" == "BUNDLE" ]] && is_bundle=true || is_bundle=false
-						break 2
-					fi
-				done
-			done
-			[ -z "$dlurl" ] && return 1
-			resp=$(req "$dlurl" -)
-		fi
-		url=$(echo "$resp" | $HTMLQ --base https://www.apkmirror.com --attribute href "a.btn") || return 1
-		url=$(req "$url" - | $HTMLQ --base https://www.apkmirror.com --attribute href "span > a[rel = nofollow]") || return 1
+	local url="$1" version="${2// /-}" output="$3" arch="$4" dpi="$5" is_bundle="false" suffix=""
+	if [[ -f "${output}.apkm" ]]; then
+		req "$url" "${output}.apkm"
+		return $?
 	fi
 
-	if [ "$is_bundle" = true ]; then
-		req "$url" "${output}.apkm" || return 1
-	else
-		req "$url" "${output}" || return 1
+	[[ "$arch" == "arm-v7a" ]] && arch="armeabi-v7a"
+	local resp node apkmname dlurl=""
+	apkmname="$($HTMLQ "h1.marginZero" --text <<<"$__APKMIRROR_RESP__" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')"
+	url="${url%/}/${apkmname}-${version//./-}-release/"
+	resp="$(req "$url" -)" || return 1
+	node="$($HTMLQ "div.table-row.headerFont:nth-last-child(1)" -r "span:nth-child(n+3)" <<<"$resp")"
+
+	if [[ -n "$node" ]]; then
+		for current_dpi in $dpi; do
+			for type in APK BUNDLE; do
+				if dlurl="$(apkmirror_search "$resp" "$current_dpi" "${arch}" "$type")"; then
+					[[ "$type" == "BUNDLE" ]] && is_bundle="true"
+					break 2
+				fi
+			done
+		done
+		[[ -z "$dlurl" ]] && return 1
+		resp="$(req "$dlurl" -)"
 	fi
+	url="$(req "$($HTMLQ --base https://www.apkmirror.com --attribute href "a.btn" <<<"$resp")" - | $HTMLQ --base https://www.apkmirror.com --attribute href "span > a[rel = nofollow]")" || return 1
+
+	[[ "$is_bundle" == "true" ]] && suffix=".apkm"
+	req "$url" "${output}${suffix}" || return 1
 }
 get_apkmirror_vers() {
-	local vers apkm_resp
-	apkm_resp=$(req "https://www.apkmirror.com/uploads/?appcategory=${__APKMIRROR_CAT__}" -)
-	vers=$(sed -n 's;.*Version:</span><span class="infoSlide-value">\(.*\) </span>.*;\1;p' <<<"$apkm_resp" | awk '{$1=$1}1')
-	if [ "$__AAV__" = false ]; then
-		local IFS=$'\n'
-		vers=$(grep -iv "\(beta\|alpha\)" <<<"$vers")
-		local v r_vers=()
-		for v in $vers; do
-			grep -iq "${v} \(beta\|alpha\)" <<<"$apkm_resp" || r_vers+=("$v")
-		done
-		echo "${r_vers[*]}"
-	else
-		echo "$vers"
-	fi
+	local apkm_resp vers v r_vers=()
+	apkm_resp="$(req "https://www.apkmirror.com/uploads/?appcategory=${__APKMIRROR_CAT__}" -)" || return 1
+	vers="$(sed -n 's;.*Version:</span><span class="infoSlide-value">\(.*\) </span>.*;\1;p' <<<"$apkm_resp" | awk '{$1=$1}1')"
+	[[ "$__AAV__" != "false" ]] && { echo "$vers"; return 0; }
+	while IFS= read -r v; do
+		[[ -z "$v" ]] && continue
+		grep -iqE "${v} (beta|alpha)" <<<"$apkm_resp" || r_vers+=("$v")
+	done < <(grep -ivE "(beta|alpha)" <<<"$vers")
+	for v in "${r_vers[@]}"; do echo "$v"; done
 }
 get_apkmirror_pkg_name() { sed -n 's;.*id=\(.*\)" class="accent_color.*;\1;p' <<<"$__APKMIRROR_RESP__"; }
 get_apkmirror_resp() {
-	__APKMIRROR_RESP__=$(req "${1}" -) || return 1
+	__APKMIRROR_RESP__="$(req "${1}" -)" || return 1
 	__APKMIRROR_CAT__="${1##*/}"
 }
 
 # -------------------- uptodown --------------------
-get_uptodown_resp() {
-	__UPTODOWN_RESP__=$(req "${1}/versions" -) || return 1
-	__UPTODOWN_RESP_PKG__=$(req "${1}/download" -) || return 1
-}
-get_uptodown_vers() { $HTMLQ --text ".version" <<<"$__UPTODOWN_RESP__"; }
 dl_uptodown() {
-	local uptodown_dlurl=$1 version=$2 output=$3 arch=$4 _dpi=$5
-	local apparch
-	if [ "$arch" = "arm-v7a" ]; then arch="armeabi-v7a"; fi
-	if [ "$arch" = all ]; then
-		apparch=('arm64-v8a, armeabi-v7a, x86_64' 'arm64-v8a, armeabi-v7a, x86, x86_64' 'arm64-v8a, armeabi-v7a')
-	else apparch=("$arch" 'arm64-v8a, armeabi-v7a, x86_64' 'arm64-v8a, armeabi-v7a, x86, x86_64' 'arm64-v8a, armeabi-v7a'); fi
+	local uptodown_dlurl="$1" version="$2" output="$3" arch="$4" _dpi="$5" is_bundle="false" suffix=""
+	local -a apparch=('arm64-v8a, armeabi-v7a, x86_64' 'arm64-v8a, armeabi-v7a, x86, x86_64' 'arm64-v8a, armeabi-v7a')
+	[[ "$arch" == "arm-v7a" ]] && arch="armeabi-v7a"
+	[[ "$arch" != "all" ]] && apparch=("$arch" "${apparch[@]}")
 
-	local i op resp data_code
-	data_code=$($HTMLQ "#detail-app-name" --attribute data-code <<<"$__UPTODOWN_RESP__")
-	local versionURL=""
-	local is_bundle=false
+	local i op resp data_code versionURL=""
+	data_code="$($HTMLQ "#detail-app-name" --attribute data-code <<<"$__UPTODOWN_RESP__")" || return 1
 	for i in {1..20}; do
-		resp=$(req "${uptodown_dlurl}/apps/${data_code}/versions/${i}" -)
-		if ! op=$(jq -e -r ".data | map(select(.version == \"${version}\")) | .[0]" <<<"$resp"); then
-			continue
-		fi
-		if [ "$(jq -e -r ".kindFile" <<<"$op")" = "xapk" ]; then is_bundle=true; fi
-		if versionURL=$(jq -e -r '.versionURL' <<<"$op"); then break; else return 1; fi
+		resp="$(req "${uptodown_dlurl}/apps/${data_code}/versions/${i}" -)" || continue
+		op="$(jq -e -r ".data | map(select(.version == \"${version}\")) | .[0]" <<<"$resp")" || continue
+		[[ "$(jq -e -r ".kindFile" <<<"$op")" == "xapk" ]] && is_bundle="true"
+		versionURL="$(jq -e -r '.versionURL' <<<"$op")" && break || return 1
 	done
-	if [ -z "$versionURL" ]; then return 1; fi
-	versionURL=$(jq -e -r '.url + "/" + .extraURL + "/" + (.versionID | tostring)' <<<"$versionURL")
-	resp=$(req "$versionURL" -) || return 1
+	[[ -z "$versionURL" ]] && return 1
+	versionURL="$(jq -e -r '.url + "/" + .extraURL + "/" + (.versionID | tostring)' <<<"$versionURL")"
+	resp="$(req "$versionURL" -)" || return 1
 
-	local data_version files node_arch="" data_file_id node_class
-	data_version=$($HTMLQ '.button.variants' --attribute data-version <<<"$resp") || return 1
-	if [ "$data_version" ]; then
-		files=$(req "${uptodown_dlurl%/*}/app/${data_code}/version/${data_version}/files" - | jq -e -r .content) || return 1
-		for ((n = 1; n < 12; n += 1)); do
-			node_class=$($HTMLQ -w -t ".content > :nth-child($n)" --attribute class <<<"$files") || return 1
-			if [ "$node_class" != "variant" ]; then
-				node_arch=$($HTMLQ -w -t ".content > :nth-child($n)" <<<"$files" | xargs) || return 1
+	local data_version files node_arch="" data_file_id node_class file_type
+	data_version="$($HTMLQ '.button.variants' --attribute data-version <<<"$resp")" || return 1
+	if [[ -n "$data_version" ]]; then
+		files="$(req "${uptodown_dlurl%/*}/app/${data_code}/version/${data_version}/files" - | jq -e -r .content)" || return 1
+		for ((n = 1; n < 12; n++)); do
+			node_class="$($HTMLQ -w -t ".content > :nth-child($n)" --attribute class <<<"$files")" || return 1
+			if [[ "$node_class" != "variant" ]]; then
+				node_arch="$($HTMLQ -w -t ".content > :nth-child($n)" <<<"$files" | xargs)" || return 1
 				continue
 			fi
-			if [ -z "$node_arch" ]; then return 1; fi
-			if ! isoneof "$node_arch" "${apparch[@]}"; then continue; fi
+			[[ -z "$node_arch" ]] && return 1
+			isoneof "$node_arch" "${apparch[@]}" || continue
 
-			file_type=$($HTMLQ -w -t ".content > :nth-child($n) > .v-file > span" <<<"$files") || return 1
-			if [ "$file_type" = "xapk" ]; then is_bundle=true; else is_bundle=false; fi
-			data_file_id=$($HTMLQ ".content > :nth-child($n) > .v-report" --attribute data-file-id <<<"$files") || return 1
-			resp=$(req "${uptodown_dlurl}/download/${data_file_id}-x" -)
+			file_type="$($HTMLQ -w -t ".content > :nth-child($n) > .v-file > span" <<<"$files")" || return 1
+			[[ "$file_type" == "xapk" ]] && is_bundle="true" || is_bundle="false"
+			data_file_id="$($HTMLQ ".content > :nth-child($n) > .v-report" --attribute data-file-id <<<"$files")" || return 1
+			resp="$(req "${uptodown_dlurl}/download/${data_file_id}-x" -)"
 			break
 		done
-		if [ $n -eq 12 ]; then return 1; fi
+		(( n == 12 )) && return 1
 	fi
 	local data_url
-	data_url=$($HTMLQ "#detail-download-button" --attribute data-url <<<"$resp") || return 1
-	if [ $is_bundle = true ]; then
-		req "https://dw.uptodown.com/dwn/${data_url}" "$output.apkm" || return 1
-	else
-		req "https://dw.uptodown.com/dwn/${data_url}" "$output"
-	fi
+	data_url="$($HTMLQ "#detail-download-button" --attribute data-url <<<"$resp")" || return 1
+	[[ "$is_bundle" == "true" ]] && suffix=".apkm"
+	req "https://dw.uptodown.com/dwn/${data_url}" "${output}${suffix}"
 }
+get_uptodown_vers() { $HTMLQ --text ".version" <<<"$__UPTODOWN_RESP__"; }
 get_uptodown_pkg_name() { $HTMLQ --text "tr.full:nth-child(1) > td:nth-child(3)" <<<"$__UPTODOWN_RESP_PKG__"; }
+get_uptodown_resp() {
+	__UPTODOWN_RESP__="$(req "${1}/versions" -)" || return 1
+	__UPTODOWN_RESP_PKG__="$(req "${1}/download" -)" || return 1
+}
 
 # -------------------- archive --------------------
 dl_archive() {
-	local url=$1 version=$2 output=$3 arch=$4
-	local path version=${version// /}
-	path=$(grep "${version_f#v}-${arch// /}" <<<"$__ARCHIVE_RESP__") || return 1
+	local url="$1" version="${2// /}" output="$3" arch="${4// /}" path
+	path="$(grep "${version#v}-${arch}" <<<"$__ARCHIVE_RESP__")" || return 1
 	req "${url}/${path}" "$output"
-}
-get_archive_resp() {
-	local r
-	r=$(req "$1" -)
-	if [ -z "$r" ]; then return 1; else __ARCHIVE_RESP__=$(sed -n 's;^<a href="\(.*\)"[^"]*;\1;p' <<<"$r"); fi
-	__ARCHIVE_PKG_NAME__=$(awk -F/ '{print $NF}' <<<"$1")
 }
 get_archive_vers() { sed 's/^[^-]*-//;s/-\(all\|arm64-v8a\|arm-v7a\)\.apk//g' <<<"$__ARCHIVE_RESP__"; }
 get_archive_pkg_name() { echo "$__ARCHIVE_PKG_NAME__"; }
-
+get_archive_resp() {
+	local r
+	r="$(req "$1" -)"
+	[[ -z "$r" ]] && return 1
+	__ARCHIVE_RESP__="$(sed -n 's;^<a href="\(.*\)"[^"]*;\1;p' <<<"$r")"
+	__ARCHIVE_PKG_NAME__="${1##*/}"
+}
 # -------------------- direct --------------------
 dl_direct() {
-	local url=$1 version=${2// /-} output=$3 arch=$4 dpi=$5
+	local url="$1" version="${2// /-}" output="$3" arch="$4" dpi="$5"
 	req "$url" "${output}" || return 1
 }
 get_direct_vers() { cut -d- -f2 <<<"$__DIRECT_APKNAME__"; }
 get_direct_pkg_name() { cut -d- -f1 <<<"$__DIRECT_APKNAME__"; }
-get_direct_resp() { __DIRECT_APKNAME__=$(awk -F/ '{print $NF}' <<<"$1"); }
+get_direct_resp() { __DIRECT_APKNAME__="${1##*/}"; }
 # --------------------------------------------------
 
 patch_apk() {
-	local stock_input=$1 patched_apk=$2 patcher_args=$3 cli_jar=$4 patches_jar=$5
-	local cmd="java -jar '$cli_jar' patch '$stock_input' --purge -o '$patched_apk' -p '$patches_jar' --keystore=ks.keystore \
+	local stock_input="$1" patched_apk="$2" patcher_args="$3" cli_jar="$4" patches_mpp="$5"
+	local cmd="java -jar '$cli_jar' patch '$stock_input' --purge -o '$patched_apk' -p '$patches_mpp' --keystore=ks.keystore \
 --keystore-entry-password=r4nD0M.paS4W0rD --keystore-password=r4nD0M.paS4W0rD --signer=krvstek --keystore-entry-alias=krvstek $patcher_args"
 	pr "$cmd"
-	if eval "$cmd"; then [ -f "$patched_apk" ]; else
-		rm "$patched_apk" 2>/dev/null || :
-		return 1
-	fi
+	eval "$cmd" && [[ -f "$patched_apk" ]] || { rm -f "$patched_apk"; return 1; }
 }
-
 check_sig() {
-	local file=$1 pkg_name=$2
-	local sig
-	if grep -q "$pkg_name" sig.txt; then
-		sig=$(java -jar --enable-native-access=ALL-UNNAMED "$APKSIGNER" verify --print-certs "$file" | grep ^Signer | grep SHA-256 | tail -1 | awk '{print $NF}')
-		echo "$pkg_name signature: ${sig}"
-		grep -qFx "$sig $pkg_name" sig.txt
-	fi
+	local file="$1" pkg_name="$2" sig
+	grep -q "$pkg_name" sig.txt || return 0
+	sig="$(java -jar --enable-native-access=ALL-UNNAMED "$APKSIGNER" verify --print-certs "$file" | awk '/^Signer.*SHA-256/ {sig=$NF} END {print sig}')"
+	[[ -z "$sig" ]] && return 1
+	echo "$pkg_name signature: ${sig}"
+	grep -qFx "$sig $pkg_name" sig.txt
 }
-
 build_uni() {
 	eval "declare -A args=${1#*=}"
 	local version="" pkg_name=""
-	local version_mode=${args[version]}
-	local app_name=${args[app_name]}
-	local app_name_l=${app_name,,}
-	app_name_l=${app_name_l// /-}
-	local table=${args[table]}
-	local dl_from=${args[dl_from]}
-	local arch=${args[arch]}
+	local version_mode="${args[version]}"
+	local app_name="${args[app_name]}"
+	local -l app_name_l="${app_name// /-}"
+	local table="${args[table]}"
+	local dl_from="${args[dl_from]}"
+	local arch="${args[arch]}"
 	local arch_f="${arch// /}"
 
-	local p_patcher_args=()
-	if [ "${args[excluded_patches]}" ]; then p_patcher_args+=("$(join_args "${args[excluded_patches]}" -d)"); fi
-	if [ "${args[included_patches]}" ]; then p_patcher_args+=("$(join_args "${args[included_patches]}" -e)"); fi
-	[ "${args[exclusive_patches]}" = true ] && p_patcher_args+=("--exclusive")
+	local -a p_patcher_args=()
+	[[ -n "${args[excluded_patches]}" ]] && p_patcher_args+=("$(join_args "${args[excluded_patches]}" -d)")
+	[[ -n "${args[included_patches]}" ]] && p_patcher_args+=("$(join_args "${args[included_patches]}" -e)")
+	[[ "${args[exclusive_patches]}" == "true" ]] && p_patcher_args+=("--exclusive")
 
 	local tried_dl=()
 	for dl_p in archive apkmirror uptodown; do
-		if [ -z "${args[${dl_p}_dlurl]}" ]; then continue; fi
-		if ! get_${dl_p}_resp "${args[${dl_p}_dlurl]}" || ! pkg_name=$(get_"${dl_p}"_pkg_name); then
+		local p_url="${args[${dl_p}_dlurl]}"
+		[[ -z "$p_url" ]] && continue
+		if ! get_${dl_p}_resp "$p_url" || ! pkg_name="$(get_"${dl_p}"_pkg_name)"; then
 			args[${dl_p}_dlurl]=""
 			epr "ERROR: Could not find ${table} in ${dl_p}"
 			continue
 		fi
 		tried_dl+=("$dl_p")
-		dl_from=$dl_p
+		dl_from="$dl_p"
 		break
 	done
-	if [ -z "$pkg_name" ]; then
-		epr "empty pkg name, not building ${table}."
-		return 0
-	fi
+	[[ -z "$pkg_name" ]] && { epr "empty pkg name, not building ${table}."; return 0; }
 	local list_patches
-	if ! list_patches=$(java -jar "$cli_jar" list-patches --patches "$patches_jar" -f "$pkg_name" -v -p 2>&1); then
-		epr "Could not get patches list from $cli_jar"
-		return 1
-	fi
+	list_patches="$(patches_list "$cli_jar" "$patches_mpp" "$pkg_name")" || return 1
 
-	local get_latest_ver=false
-	if [ "$version_mode" = auto ]; then
-		if ! version=$(get_patch_last_supported_ver "$list_patches" "$pkg_name" \
-			"${args[included_patches]}" "${args[excluded_patches]}" "${args[exclusive_patches]}"); then
-			exit 1
-		elif [ -z "$version" ]; then get_latest_ver=true; fi
-	elif isoneof "$version_mode" latest beta; then
-		get_latest_ver=true
-		p_patcher_args+=("-f")
+	local get_latest_ver="false"
+	if [[ "$version_mode" == "auto" ]]; then
+		version="$(get_patch_last_supported_ver "$list_patches" "$pkg_name" \
+			"${args[included_patches]}" "${args[excluded_patches]}" "${args[exclusive_patches]}")" || {
+			epr "get_patch_last_supported_ver failed '$list_patches'"
+			return
+		}
+		[[ -z "$version" ]] && get_latest_ver="true"
 	else
-		version=$version_mode
 		p_patcher_args+=("-f")
+		isoneof "$version_mode" latest beta && get_latest_ver="true" || version="$version_mode"
 	fi
-	if [ $get_latest_ver = true ]; then
-		if [ "$version_mode" = beta ]; then __AAV__="true"; else __AAV__="false"; fi
-		pkgvers=$(get_"${dl_from}"_vers)
-		version=$(get_highest_ver <<<"$pkgvers") || version=$(head -1 <<<"$pkgvers")
+	if [[ "$get_latest_ver" == "true" ]]; then
+		__AAV__="false"
+		[[ "$version_mode" == "beta" ]] && __AAV__="true"
+		pkgvers="$(get_"${dl_from}"_vers)"
+		version="$(get_highest_ver <<<"$pkgvers")" || version="$(head -n 1 <<<"$pkgvers")"
 	fi
-	if [ -z "$version" ]; then
-		epr "empty version, not building ${table}."
-		return 0
-	fi
+	[[ -z "$version" ]] && { epr "empty version, not building ${table}."; return 0; }
 
 	pr "Choosing version '${version}' for ${table}"
-	local version_f=${version// /}
-	version_f=${version_f#v}
+	local version_f="${version// /}"; version_f="${version_f#v}"
 	local stock_apk="${TEMP_DIR}/${pkg_name}-${version_f}-${arch_f}.apk"
-	if [ ! -f "$stock_apk" ] && [ ! -f "${stock_apk}.apkm" ]; then
+	if [[ ! -f "$stock_apk" && ! -f "${stock_apk}.apkm" ]]; then
 		for dl_p in archive apkmirror uptodown; do
-			if [ -z "${args[${dl_p}_dlurl]}" ]; then continue; fi
+			local p_url="${args[${dl_p}_dlurl]}"
+			[[ -z "$p_url" ]] && continue
 			pr "Downloading '${table}' from '${dl_p}'"
-			if ! isoneof $dl_p "${tried_dl[@]}"; then
-				if ! get_${dl_p}_resp "${args[${dl_p}_dlurl]}"; then
-					epr "ERROR: Could not get '${table}' from '${dl_p}'"
-					continue
-				fi
+			if ! isoneof "$dl_p" "${tried_dl[@]}" && ! get_${dl_p}_resp "$p_url"; then
+				epr "ERROR: Could not get '${table}' from '${dl_p}'"
+				continue
 			fi
-			if ! dl_${dl_p} "${args[${dl_p}_dlurl]}" "$version" "$stock_apk" "$arch" "${args[dpi]}" "$get_latest_ver"; then
+			if ! dl_${dl_p} "$p_url" "$version" "$stock_apk" "$arch" "${args[dpi]}" "$get_latest_ver"; then
 				epr "ERROR: Could not download '${table}' from '${dl_p}' with version '${version}', arch '${arch}', dpi '${args[dpi]}'"
 				continue
 			fi
 			break
 		done
-		if [ ! -f "$stock_apk" ] && [ ! -f "${stock_apk}.apkm" ]; then return 0; fi
+		[[ ! -f "$stock_apk" && ! -f "${stock_apk}.apkm" ]] && return 0
 	fi
-	if [ -f "${stock_apk}.apkm" ]; then
+	if [[ -f "${stock_apk}.apkm" ]]; then
 		local tmp_base
-		tmp_base=$(mktemp --suffix=.apk)
-		if ! unzip -p "${stock_apk}.apkm" base.apk > "$tmp_base" 2>/dev/null || [ ! -s "$tmp_base" ]; then
+		tmp_base="$(mktemp --suffix=.apk)"
+		if ! unzip -p "${stock_apk}.apkm" base.apk > "$tmp_base" 2>/dev/null || [[ ! -s "$tmp_base" ]]; then
 			unzip -p "${stock_apk}.apkm" "${pkg_name}.apk" > "$tmp_base" 2>/dev/null
 		fi
-		if [ -s "$tmp_base" ]; then
-			if ! OP=$(check_sig "$tmp_base" "$pkg_name" 2>&1); then
-				rm -f "$tmp_base"
-				epr "$pkg_name not building, apk signature mismatch in bundle '$stock_apk': $OP"
-				return 0
-			fi
+		if [[ -s "$tmp_base" ]] && ! OP="$(check_sig "$tmp_base" "$pkg_name" 2>&1)"; then
+			rm -f "$tmp_base"
+			epr "$pkg_name not building, apk signature mismatch in bundle '$stock_apk': $OP"
+			return 0
 		fi
 		rm -f "$tmp_base"
-	elif ! OP=$(check_sig "$stock_apk" "$pkg_name" 2>&1) && ! grep -qFx "ERROR: Missing META-INF/MANIFEST.MF" <<<"$OP"; then
+	elif ! OP="$(check_sig "$stock_apk" "$pkg_name" 2>&1)" && ! grep -qFx "ERROR: Missing META-INF/MANIFEST.MF" <<<"$OP"; then
 		epr "$pkg_name not building, apk signature mismatch '$stock_apk': $OP"
 		return 0
 	fi
 	log "🟢 » ${table}: \`${version}\`"
 
 	local microg_patch disable_psu_patch
-	microg_patch=$(grep "^Name: " <<<"$list_patches" | grep -i "gmscore\|microg" || :) microg_patch=${microg_patch#*: }
-	disable_psu_patch=$(grep "^Name: " <<<"$list_patches" | grep -i "disable play store updates" || :) disable_psu_patch=${disable_psu_patch#*: }
+	microg_patch="$(grep -iE "^Name: .*(gmscore|microg)" <<<"$list_patches" || :)"; microg_patch="${microg_patch#*: }"
+	disable_psu_patch="$(grep -i "^Name: .*disable play store updates" <<<"$list_patches" || :)"; disable_psu_patch="${disable_psu_patch#*: }"
 	for _auto_patch in "$microg_patch" "$disable_psu_patch"; do
-		[ -z "$_auto_patch" ] && continue
-		if [[ ${p_patcher_args[*]} =~ $_auto_patch ]]; then
+		[[ -z "$_auto_patch" ]] && continue
+		if [[ "${p_patcher_args[*]}" =~ $_auto_patch ]]; then
 			wpr "You can't include/exclude '$_auto_patch' patch as that's done by builder automatically."
 			p_patcher_args=("${p_patcher_args[@]//-[de] \"${_auto_patch}\"/}")
 		fi
 	done
 
 	local patcher_args patched_apk
-	local brand_f=${args[brand],,}
-	brand_f=${brand_f// /-}
-	if [ "${args[patcher_args]}" ]; then p_patcher_args+=("${args[patcher_args]}"); fi
+	local -l brand_f="${args[brand]// /-}"
+	[[ -n "${args[patcher_args]}" ]] && p_patcher_args+=("${args[patcher_args]}")
 	patcher_args=("${p_patcher_args[@]}")
 	pr "Building '${table}'"
 	for _auto_patch in "$microg_patch" "$disable_psu_patch"; do
-		[ -n "$_auto_patch" ] && patcher_args+=("-e \"${_auto_patch}\"")
+		[[ -n "$_auto_patch" ]] && patcher_args+=("-e \"${_auto_patch}\"")
 	done
 	patched_apk="${TEMP_DIR}/${app_name_l}-${brand_f}-${version_f}-${arch_f}.apk"
 
@@ -562,91 +515,73 @@ build_uni() {
 		*) libs="arm64-v8a,armeabi-v7a" ;;
 	esac
 	patcher_args+=("--striplibs $libs")
-	local stock_apk_input
-	if [ -f "${stock_apk}.apkm" ]; then stock_apk_input="${stock_apk}.apkm"; else stock_apk_input="$stock_apk"; fi
-	if [ "${NORB:-}" != true ] || [ ! -f "$patched_apk" ]; then
-		if ! patch_apk "$stock_apk_input" "$patched_apk" "${patcher_args[*]}" "${args[cli]}" "${args[ptjar]}"; then
+	local stock_apk_input="$stock_apk"
+	[[ -f "${stock_apk}.apkm" ]] && stock_apk_input="${stock_apk}.apkm"
+	if [[ "${NORB:-}" != "true" || ! -f "$patched_apk" ]]; then
+		patch_apk "$stock_apk_input" "$patched_apk" "${patcher_args[*]}" "${args[cli]}" "${args[ptmpp]}" || {
 			epr "Building '${table}' failed!"
 			return 0
-		fi
+		}
 	fi
 	local apk_output="${BUILD_DIR}/${app_name_l}-${brand_f}-v${version_f}-${arch_f}.apk"
 	mv -f "$patched_apk" "$apk_output"
 	pr "Built ${table}: '${apk_output}'"
 }
 
-list_args() { tr -d '\t\r' <<<"$1" | tr -s ' ' | sed 's/" "/"\n"/g' | sed 's/\([^"]\)"\([^"]\)/\1'\''\2/g' | grep -v '^$' || :; }
+list_args() { grep -o '"[^"]*"' <<<"$1" || :; }
 join_args() { list_args "$1" | sed "s/^/${2} /" | paste -sd " " - || :; }
 separate_config() {
-	if [[ $# -lt 3 ]]; then
-		echo "Usage: separate_config <config_file> <key_to_match> <output_file> [arch_override]"
-		return 1
-	fi
-	local config_file="$1" key_to_match="$2" output_file="$3" arch_override="${4:-}" section_content
-	section_content=$(awk -v key="$key_to_match" '
+	local config="$1" key="$2" output="$3" arch="${4:-}" content
+	content="$(awk -v key="$key" '
 		BEGIN { print "[" key "]" }
 		/^\[/ && tolower($1) == "[" tolower(key) "]" { in_section = 1; next }
 		/^\[/ { in_section = 0 }
 		in_section == 1
-	' "$config_file")
-	if [[ -z "$section_content" ]]; then
-		echo "Key '$key_to_match' not found in the config file."
-		return 1
-	fi
-	if [ -n "$arch_override" ]; then
-		if grep -q '^arch = ' <<<"$section_content"; then
-			section_content=$(sed 's/^arch = .*/arch = "'"$arch_override"'"/' <<<"$section_content")
+	' "$config")"
+	[[ -z "$content" ]] && { echo "Key '$key' not found in the config file."; return 1; }
+	if [[ -n "$arch" ]]; then
+		if grep -q '^arch = ' <<<"$content"; then
+			# shellcheck disable=SC2001
+			content="$(sed 's/^arch = .*/arch = "'"$arch"'"/' <<<"$content")"
 		else
-			section_content+=$'\narch = "'"$arch_override"'"'
+			content+=$'\narch = "'"$arch"'"'
 		fi
 	fi
-	echo "$section_content" > "$output_file"
-	echo "Section for '$key_to_match' written to $output_file"
+	echo "$content" > "$output"
+	echo "Section for '$key' written to $output"
 }
 combine_logs() {
-	local build_logs_dir="${1:-build-logs}"
-	local log_files=()
-	while IFS= read -r -d '' log; do
-		log_files+=("$log")
-	done < <(find "$build_logs_dir" -name "build.md" -type f -print0 2>/dev/null | sort -z || true)
-	for log in "${log_files[@]}"; do
-		grep "^🟢" "$log" 2>/dev/null || true
-	done
+	local -a logs
+	local dir="${1:-logs}"
+	mapfile -d '' logs < <(find "$dir" -name "build.md" -type f -print0 2>/dev/null | sort -z || true)
+	(( ${#logs[@]} == 0 )) && return 0
+	grep -h "^🟢" "${logs[@]}" 2>/dev/null || true
 	echo ""
-	for log in "${log_files[@]}"; do
-		if grep -q "MicroG" "$log" 2>/dev/null; then
-			grep "^-.*MicroG" "$log" 2>/dev/null || true
-			echo ""
-			break
-		fi
-	done
+	cat "${logs[@]}" 2>/dev/null | grep -m 1 "^-.*MicroG" && echo ""
 
-	local temp_file
-	temp_file=$(mktemp)
-	trap 'rm -f "$temp_file"' RETURN
-	for log in "${log_files[@]}"; do
-		awk '/^>.*CLI:/{p=1} p{print} /^\[.*Changelog\]/{print ""; p=0}' "$log" 2>/dev/null >> "$temp_file" || true
-	done
-	if [ -s "$temp_file" ]; then
-		awk '!seen[$0]++' "$temp_file"
-	fi
+	local temp
+	temp="$(mktemp)"
+	trap 'rm -f "$temp"' RETURN
+	awk '/^>.*CLI:/{p=1} p{print} /^\[.*Changelog\]/{print ""; p=0}' "${logs[@]}" 2>/dev/null > "$temp" || true
+	[[ -s "$temp" ]] && awk '!seen[$0]++' "$temp"
 }
 get_matrix() {
-	local config_file="${1:-config.toml}" patch_source="${2:-morphe}"
-	toml_prep "$config_file" || abort "could not find config file '$config_file'"
+	local config="${1:-config.toml}" source="${2:-morphe}"
+	toml_prep "$config" || abort "could not find config file '$config'"
 
 	local main_t def_brand
-	main_t=$(toml_get_table_main)
-	def_brand=$(toml_get "$main_t" brand) || def_brand="Morphe"
+	main_t="$(toml_get_table_main)"
+	def_brand="$(toml_get "$main_t" brand)" || def_brand="Morphe"
 
-	local ids=() patch_source_lower="${patch_source,,}"
+	local -a ids=()
+	local sourcel="${source,,}"
 	while IFS= read -r table; do
-		local table_t brand
-		table_t=$(toml_get_table "$table")
-		brand=$(toml_get "$table_t" brand) || brand="$def_brand"
-		if [ "${brand,,}" = "$patch_source_lower" ]; then
-			arch=$(toml_get "$table_t" arch) || arch="all"
-			if [ "$arch" = "both" ]; then
+		local table_t brand arch
+		table_t="$(toml_get_table "$table")"
+		brand="$(toml_get "$table_t" brand)" || brand="$def_brand"
+		if [[ "${brand,,}" == "$sourcel" ]]; then
+			arch="$(toml_get "$table_t" arch)" || arch="all"
+			if [[ "$arch" == "both" ]]; then
 				ids+=("{\"id\":\"${table}\",\"arch\":\"arm64-v8a\"}")
 				ids+=("{\"id\":\"${table}\",\"arch\":\"arm-v7a\"}")
 			else
@@ -655,9 +590,7 @@ get_matrix() {
 		fi
 	done < <(toml_get_table_names)
 
-	if [ ${#ids[@]} -eq 0 ]; then
-		abort "No apps found for patch source '$patch_source'"
-	fi
+	(( ${#ids[@]} == 0 )) && abort "No apps found for patch source '$source'"
 	local matrix
 	printf -v matrix '%s,' "${ids[@]}"
 	echo "{\"include\":[${matrix%,}]}"
