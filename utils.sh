@@ -99,7 +99,11 @@ get_prebuilts() {
 		[[ "$tag" == "Patches" ]] && ext="mpp"
 
 		local url file tag_name matches count
-		file="$(find "$dir" -name "*${fprefix}-${name_ver#v}.${ext}" -type f 2>/dev/null)"
+		if [[ "$ver" == "latest" ]]; then
+			file="$(find "$dir" -name "*${fprefix}-${name_ver#v}.${ext}" ! -name "*dev*" -type f 2>/dev/null | head -n 1)"
+		else
+			file="$(find "$dir" -name "*${fprefix}-${name_ver#v}.${ext}" -type f 2>/dev/null | head -n 1)"
+		fi
 		if [[ -z "$file" ]]; then
 			local resp name
 			resp="$(gh_req "$uni_rel" -)" || return 1
@@ -126,12 +130,6 @@ get_prebuilts() {
 			echo "> ⚙️ » $tag: \`$(cut -d/ -f1 <<<"$src")/${name}\`  " >>"${cl_dir}/changelog.md"
 		else
 			grab_cl="false"
-			if [[ "$ver" == "latest" ]]; then
-				file="$(grep -m 1 -v '/[^/]*dev[^/]*$' <<<"$file")"
-			else
-				file="$(grep -m 1 "/[^/]*${ver#v}[^/]*\$" <<<"$file")"
-			fi
-			[[ -z "$file" ]] && abort "filter fail: '$file' with '$ver'"
 			name="${file##*/}"
 			tag_name="v${name#*-*-}"
 			tag_name="${tag_name%.*}"
