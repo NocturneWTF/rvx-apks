@@ -43,7 +43,8 @@ wpr() {
 }
 abort() {
 	epr "ABORT: ${1-}"
-	exit 1
+	rm -rf "$TEMP_DIR"/*tmp.* "$TEMP_DIR"/*/*tmp.* "$TEMP_DIR"/*-temporary-files
+	kill -n 9 0
 }
 java() { command java "$@"; }
 

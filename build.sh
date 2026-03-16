@@ -2,11 +2,12 @@
 
 set -euo pipefail
 shopt -s nullglob
-trap "rm -rf temp/*tmp.* temp/*/*tmp.* temp/*-temporary-files; kill 0; exit 130" INT
-[[ "${1-}" == "clean" ]] && { rm -rf temp build logs build.md; exit 0; }
 
 # shellcheck disable=SC1091
 source utils.sh
+trap "abort" INT
+[[ "${1-}" == "clean" ]] && { rm -rf "$TEMP_DIR" "$BUILD_DIR"; exit 0; }
+
 set_prebuilts
 _UA=$(ua)
 export _UA
