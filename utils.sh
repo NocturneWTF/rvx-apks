@@ -3,6 +3,7 @@
 TEMP_DIR="temp"
 BIN_DIR="bin"
 BUILD_DIR="build"
+DL_SRCS=("direct" "archive" "apkmirror" "uptodown")
 GH_HEADER=""
 [[ -n "${GITHUB_TOKEN-}" ]] && GH_HEADER="Authorization: token ${GITHUB_TOKEN}"
 
@@ -148,10 +149,11 @@ set_prebuilts() {
 }
 
 _req() {
-	local ip="$1" op="$2" dlp=""
+	local ip="$1" op="$2"
 	shift 2
 	local cookie="$TEMP_DIR/cookie.txt"
-	local curl_args=(-L -c "$cookie" -b "$cookie" --connect-timeout 5 --retry 0 --fail -s -S "$@" "$ip")
+	local curl_args=(-L -c "$cookie" -b "$cookie" --connect-timeout 10 --retry 1 --fail -s -S "$@" "$ip")
+	local dlp="$op"
 	if [[ "$op" != "-" ]]; then
 		[[ -f "$op" ]] && return 0
 		dlp="${op%/*}/tmp.${op##*/}"
@@ -164,7 +166,9 @@ _req() {
 
 	curl "${curl_args[@]}" || { epr "Request failed: $ip"; return 1; }
 	[[ -z "$dlp" ]] && return 0
-	mv -f "$dlp" "$op"
+	if [[ "$dlp" != "-" ]]; then
+		mv -f "$dlp" "$op"
+	fi
 }
 ua() {
 	local ver
@@ -413,10 +417,10 @@ build_uni() {
 	[[ "${args[exclusive_patches]}" == "true" ]] && p_patcher_args+=("--exclusive")
 
 	local tried_dl=()
-	for dl_p in archive apkmirror uptodown; do
+	for dl_p in "${DL_SRCS[@]}"; do
 		local p_url="${args[${dl_p}_dlurl]}"
 		[[ -z "$p_url" ]] && continue
-		if ! get_${dl_p}_resp "$p_url" || ! pkg_name="$(get_"${dl_p}"_pkg_name)"; then
+		if ! get_"${dl_p}"_resp "$p_url" || ! pkg_name="$(get_"${dl_p}"_pkg_name)"; then
 			args[${dl_p}_dlurl]=""
 			epr "ERROR: Could not find ${table} in ${dl_p}"
 			continue
@@ -426,6 +430,7 @@ build_uni() {
 		break
 	done
 	[[ -z "$pkg_name" ]] && { epr "empty pkg name, not building ${table}."; return 0; }
+	pr "Package name of '${table}' is '$pkg_name'"
 	local list_patches
 	list_patches="$(patches_list "$cli_jar" "$patches_mpp" "$pkg_name")" || return 1
 
@@ -453,21 +458,24 @@ build_uni() {
 	local version_f="${version// /}"; version_f="${version_f#v}"
 	local stock_apk="${TEMP_DIR}/${pkg_name}-${version_f}-${arch_f}.apk"
 	if [[ ! -f "$stock_apk" && ! -f "${stock_apk}.apkm" ]]; then
-		for dl_p in archive apkmirror uptodown; do
+		for dl_p in "${DL_SRCS[@]}"; do
 			local p_url="${args[${dl_p}_dlurl]}"
 			[[ -z "$p_url" ]] && continue
 			pr "Downloading '${table}' from '${dl_p}'"
-			if ! isoneof "$dl_p" "${tried_dl[@]}" && ! get_${dl_p}_resp "$p_url"; then
+			if ! isoneof "$dl_p" "${tried_dl[@]}" && ! get_"${dl_p}"_resp "$p_url"; then
 				epr "ERROR: Could not get '${table}' from '${dl_p}'"
 				continue
 			fi
-			if ! dl_${dl_p} "$p_url" "$version" "$stock_apk" "$arch" "${args[dpi]}" "$get_latest_ver"; then
+			if ! dl_"${dl_p}" "$p_url" "$version" "$stock_apk" "$arch" "${args[dpi]}" "$get_latest_ver"; then
 				epr "ERROR: Could not download '${table}' from '${dl_p}' with version '${version}', arch '${arch}', dpi '${args[dpi]}'"
 				continue
 			fi
 			break
 		done
-		[[ ! -f "$stock_apk" && ! -f "${stock_apk}.apkm" ]] && return 0
+		if [[ ! -f "$stock_apk" && ! -f "${stock_apk}.apkm" ]]; then
+			epr "Stock apk not found ($stock_apk)"
+			return 0
+		fi
 	fi
 	if [[ -f "${stock_apk}.apkm" ]]; then
 		local tmp_base
@@ -477,12 +485,12 @@ build_uni() {
 		fi
 		if [[ -s "$tmp_base" ]] && ! OP="$(check_sig "$tmp_base" "$pkg_name" 2>&1)"; then
 			rm -f "$tmp_base"
-			epr "$pkg_name not building, apk signature mismatch in bundle '$stock_apk': $OP"
+			epr "Not building $table, apk signature mismatch in bundle '$stock_apk': $OP"
 			return 0
 		fi
 		rm -f "$tmp_base"
 	elif ! OP="$(check_sig "$stock_apk" "$pkg_name" 2>&1)" && ! grep -qFx "ERROR: Missing META-INF/MANIFEST.MF" <<<"$OP"; then
-		epr "$pkg_name not building, apk signature mismatch '$stock_apk': $OP"
+		epr "Not building $table, apk signature mismatch '$stock_apk': $OP"
 		return 0
 	fi
 	log "🟢 » ${table}: \`${version}\`"

@@ -82,7 +82,7 @@ for table_name in $(toml_get_table_names); do
 	app_args[patcher_args]="$(toml_get "$t" patcher-args)" || app_args[patcher_args]=""
 	app_args[table]="$table_name"
 
-	for dl_from in "direct" "uptodown" "apkmirror" "archive"; do
+	for dl_from in "${DL_SRCS[@]}"; do
 		if dl_url="$(toml_get "$t" "${dl_from}-dlurl")"; then
 			dl_url="${dl_url%/}";
 			dl_url="${dl_url%download}";
@@ -93,7 +93,7 @@ for table_name in $(toml_get_table_names); do
 			app_args[${dl_from}_dlurl]=""
 		fi
 	done
-	[[ -z "${app_args[dl_from]-}" ]] && abort "ERROR: no 'apkmirror-dlurl', 'uptodown-dlurl' or 'archive-dlurl' option was set for '$table_name'."
+	[[ -z "${app_args[dl_from]-}" ]] && abort "ERROR: no 'dlurl' option was set for '$table_name'. (${DL_SRCS[*]})"
 	app_args[arch]="$(toml_get "$t" arch)" || app_args[arch]="all"
 	isoneof "${app_args[arch]}" "both" "all" "arm64-v8a" "arm-v7a" "x86_64" "x86" || abort "wrong arch '${app_args[arch]}' for '$table_name'"
 	app_args[dpi]="$(toml_get "$t" dpi)" || app_args[dpi]="$DEF_DPI_LIST"
