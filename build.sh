@@ -48,10 +48,7 @@ for table_name in $(toml_get_table_names); do
 	enabled="$(toml_get "$t" enabled)" || enabled="true"
 	vtf "$enabled" "enabled"
 	[[ "$enabled" == "false" ]] && continue
-	if ((idx >= PARALLEL_JOBS)); then
-		wait -n
-		(( idx-- ))
-	fi
+	(( idx >= PARALLEL_JOBS )) && { wait -n; (( idx-- )); }
 
 	declare -A app_args
 	patches_src="$(toml_get "$t" patches-source)" || patches_src="$DEF_PATCHES_SRC"
@@ -104,10 +101,7 @@ for table_name in $(toml_get_table_names); do
 		build_uni app_args &
 		app_args[table]="$table_name (arm-v7a)"
 		app_args[arch]="arm-v7a"
-		if ((idx >= PARALLEL_JOBS)); then
-			wait -n
-			idx=$((idx - 1))
-		fi
+		(( idx >= PARALLEL_JOBS )) && { wait -n; (( idx-- )); }
 		idx=$((idx + 1))
 		build_uni app_args &
 	else

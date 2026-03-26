@@ -4,8 +4,12 @@ TEMP_DIR="temp"
 BIN_DIR="bin"
 BUILD_DIR="build"
 DL_SRCS=("direct" "archive" "apkmirror" "uptodown")
-GH_HEADER=""
-[[ -n "${GITHUB_TOKEN-}" ]] && GH_HEADER="Authorization: token ${GITHUB_TOKEN}"
+GH_HEADER=()
+if [[ -n "${GITHUB_TOKEN-}" ]]; then
+	CURL_HEADER="$(mktemp)"
+	printf 'Authorization: token %s\n' "${GITHUB_TOKEN}" > "$CURL_HEADER"
+	GH_HEADER=("-H" @"$CURL_HEADER")
+fi
 
 toml_prep() {
 	[[ -f "$1" ]] || return 1
@@ -28,18 +32,18 @@ toml_get() {
 	op="${op//"''"/$qp}"
 	op="${op//"'"/'"'}"
 	op="${op//$qp/$'\''}"
-	echo "$op"
+	printf '%s\n' "$op"
 }
 
-pr() { echo >&2 -e "\033[0;32m[+] ${1}\033[0m"; }
+pr() { printf '\033[0;32m[+] %b\033[0m\n' "${1}" >&2; }
 epr() {
-	echo >&2 -e "\033[0;31m[-] ${1}\033[0m"
-	[[ -n "${GITHUB_REPOSITORY-}" ]] && echo >&2 -e "::error::utils.sh [-] ${1}\n"
+	printf '\033[0;31m[-] %b\033[0m\n' "${1}" >&2
+	[[ -n "${GITHUB_REPOSITORY-}" ]] && printf '::error::utils.sh [-] %b\n\n' "${1}" >&2
 	return 0
 }
 wpr() {
-	echo >&2 -e "\033[0;33m[!] ${1}\033[0m"
-	[[ -n "${GITHUB_REPOSITORY-}" ]] && echo >&2 -e "::warning::utils.sh [!] ${1}\n"
+	printf '\033[0;33m[!] %b\033[0m\n' "${1}" >&2
+	[[ -n "${GITHUB_REPOSITORY-}" ]] && printf '::warning::utils.sh [!] %b\n\n' "${1}" >&2
 	return 0
 }
 abort() {
@@ -47,7 +51,6 @@ abort() {
 	rm -rf "$TEMP_DIR"/*tmp.* "$TEMP_DIR"/*/*tmp.* "$TEMP_DIR"/*-temporary-files
 	kill -n 9 0
 }
-java() { command java "$@"; }
 
 install_pkg() {
 	local cmd="$1" pkg="${2:-$1}"
@@ -100,12 +103,9 @@ get_prebuilts() {
 		local ext="jar"
 		[[ "$tag" == "Patches" ]] && ext="mpp"
 
-		local url file tag_name matches count
-		if [[ "$ver" == "latest" ]]; then
-			file="$(find "$dir" -name "*${fprefix}-${name_ver#v}.${ext}" ! -name "*dev*" -type f 2>/dev/null | head -n 1)"
-		else
-			file="$(find "$dir" -name "*${fprefix}-${name_ver#v}.${ext}" -type f 2>/dev/null | head -n 1)"
-		fi
+		local url file tag_name matches count dev_args=()
+		[[ "$ver" == "latest" ]] && dev_args=('!' -name '*dev*')
+		file="$(find "$dir" -name "*${fprefix}-${name_ver#v}.${ext}" "${dev_args[@]}" -type f 2>/dev/null | head -n 1)"
 		if [[ -z "$file" ]]; then
 			local resp name
 			resp="$(gh_req "$uni_rel" -)" || return 1
@@ -115,10 +115,7 @@ get_prebuilts() {
 			if (( count > 1 )); then
 				local matches_new
 				matches_new="$(jq -e -r 'map(select(.name | contains("-dev") | not))' <<<"$matches")"
-				if (( $(jq 'length' <<<"$matches_new") == 1 )); then
-					matches="$matches_new"
-					count=1
-				fi
+				(( $(jq 'length' <<<"$matches_new") == 1 )) && { matches="$matches_new"; count=1; }
 			fi
 			if (( count == 0 )); then
 				epr "No asset was found"
@@ -129,17 +126,17 @@ get_prebuilts() {
 			read -r url name < <(jq -r '.[0] | "\(.url)\t\(.name)"' <<<"$matches")
 			file="${dir}/${name}"
 			gh_dl "$file" "$url" >&2 || return 1
-			echo "> ⚙️ » $tag: \`$(cut -d/ -f1 <<<"$src")/${name}\`  " >>"${cl_dir}/changelog.md"
+			printf '> ⚙️ » %s: `%s/%s`  \n' "$tag" "${src%%/*}" "${name}" >>"${cl_dir}/changelog.md"
 		else
 			grab_cl="false"
 			name="${file##*/}"
 			tag_name="v${name#*-*-}"
 			tag_name="${tag_name%.*}"
 		fi
-		[[ "$tag" == "Patches" && "$grab_cl" == "true" ]] && echo -e "[🔗 » Changelog](https://github.com/${src}/releases/tag/${tag_name})\n" >>"${cl_dir}/changelog.md"
-		echo -n "$file "
+		[[ "$tag" == "Patches" && "$grab_cl" == "true" ]] && printf '[🔗 » Changelog](https://github.com/%s/releases/tag/%s)\n\n' "${src}" "${tag_name}" >>"${cl_dir}/changelog.md"
+		printf '%s ' "$file"
 	done
-	echo
+	printf '\n'
 }
 set_prebuilts() {
 	APKSIGNER="${BIN_DIR}/apksigner.jar"
@@ -165,27 +162,25 @@ _req() {
 
 	curl "${curl_args[@]}" || { epr "Request failed: $ip"; return 1; }
 	[[ -z "$dlp" ]] && return 0
-	if [[ "$dlp" != "-" ]]; then
-		mv -f "$dlp" "$op"
-	fi
+	[[ "$dlp" == "-" ]] || mv -f "$dlp" "$op"
 }
 ua() {
 	local ver
 	ver="$(curl -sf "https://product-details.mozilla.org/1.0/firefox_versions.json" | jq -re '.LATEST_FIREFOX_VERSION')" || ver="148.0"
-	echo "Mozilla/5.0 (X11; Linux x86_64; rv:${ver%%.*}.0) Gecko/20100101 Firefox/${ver%%.*}.0"
+	printf 'Mozilla/5.0 (X11; Linux x86_64; rv:%s.0) Gecko/20100101 Firefox/%s.0\n' "${ver%%.*}" "${ver%%.*}"
 }
 req() {
 	[[ -z "${_UA:-}" ]] && _UA="$(ua)"
 	_req "$1" "$2" --http2 --tlsv1.3 -A "$_UA"
 }
-gh_req() { _req "$1" "$2" -H "$GH_HEADER"; }
+gh_req() { _req "$1" "$2" "${GH_HEADER[@]}"; }
 gh_dl() {
 	[[ -f "$1" ]] && return 0
 	pr "Getting '$1' from '$2'"
-	_req "$2" "$1" -H "$GH_HEADER" -H "Accept: application/octet-stream"
+	_req "$2" "$1" "${GH_HEADER[@]}" -H "Accept: application/octet-stream"
 }
 
-log() { echo -e "$1" >>"build.md"; }
+log() { printf '%b\n' "$1" >>"build.md"; }
 get_highest_ver() {
 	local vers
 	vers="$(cat)"
@@ -212,23 +207,21 @@ get_patch_last_supported_ver() {
 		[[ -n "$vers" ]] && { get_highest_ver <<<"$vers"; return 0; }
 	fi
 	op="$(patches_list_versions "$cli_jar" "$patches_mpp" "$pkg_name")" || return 1
-	op="$(tail -n +3 <<<"$op" | awk '{$1=$1}1')"
+	op="$(awk 'NR>2{$1=$1; print}' <<<"$op")"
 	[[ "$op" == "Any" ]] && return 0
 	pcount="$(head -n 1 <<<"$op")" pcount="${pcount#*(}" pcount="${pcount% *}"
-	if [[ -z "$pcount" ]]; then
-		abort "No patches found for '$pkg_name' in patches '$patches_mpp'"
-	fi
+	[[ -n "$pcount" ]] || abort "No patches found for '$pkg_name' in patches '$patches_mpp'"
 	grep -F "($pcount patch" <<<"$op" | sed 's/ (.* patch.*//' | get_highest_ver || return 1
 }
 patches_list_versions() {
 	local cli_jar="$1" patches_mpp="$2" pkg_name="$3" op
 	op="$(java -jar "$cli_jar" list-versions "$patches_mpp" -f "$pkg_name" 2>&1)" || { epr "Could not list versions $cli_jar: '$op'"; return 1; }
-	echo "$op"
+	printf '%s\n' "$op"
 }
 patches_list() {
 	local cli_jar="$1" patches_mpp="$2" pkg_name="$3" op
 	op="$(java -jar "$cli_jar" list-patches --patches "$patches_mpp" -f "$pkg_name" -v -p 2>&1)" || { epr "Could not get patches list $cli_jar: '$op'"; return 1; }
-	echo "$op"
+	printf '%s\n' "$op"
 }
 
 isoneof() {
@@ -251,21 +244,18 @@ apkmirror_search() {
 		[[ -z "$dlurl" ]] && break
 		mapfile -t lines <<<"$($HTMLQ --text --ignore-whitespace <<<"$node")"
 		if [[ "${lines[2]}" == "$apk_bundle" && "${lines[5]}" == "$dpi" ]] && isoneof "${lines[3]}" "${apparch[@]}"; then
-			echo "$dlurl"
+			printf '%s\n' "$dlurl"
 			return 0
 		fi
 	done
-	(( n == 2 )) && [[ -n "$dlurl" ]] && { echo "$dlurl"; return 0; }
+	(( n == 2 )) && [[ -n "$dlurl" ]] && { printf '%s\n' "$dlurl"; return 0; }
 	return 1
 }
 dl_apkmirror() {
 	local url="$1" version="${2// /-}" output="$3" arch="$4" dpi="$5" is_bundle="false" suffix=""
-	if [[ -f "${output}.apkm" ]]; then
-		req "$url" "${output}.apkm"
-		return $?
-	fi
-
+	[[ -f "${output}.apkm" ]] && { req "$url" "${output}.apkm"; return; }
 	[[ "$arch" == "arm-v7a" ]] && arch="armeabi-v7a"
+
 	local resp node apkmname dlurl=""
 	apkmname="$($HTMLQ "h1.marginZero" --text <<<"$__APKMIRROR_RESP__" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')"
 	url="${url%/}/${apkmname}-${version//./-}-release/"
@@ -275,10 +265,9 @@ dl_apkmirror() {
 	if [[ -n "$node" ]]; then
 		for current_dpi in $dpi; do
 			for type in APK BUNDLE; do
-				if dlurl="$(apkmirror_search "$resp" "$current_dpi" "${arch}" "$type")"; then
-					[[ "$type" == "BUNDLE" ]] && is_bundle="true"
-					break 2
-				fi
+				dlurl="$(apkmirror_search "$resp" "$current_dpi" "${arch}" "$type")" || continue
+				[[ "$type" == "BUNDLE" ]] && is_bundle="true"
+				break 2
 			done
 		done
 		[[ -z "$dlurl" ]] && return 1
@@ -293,12 +282,12 @@ get_apkmirror_vers() {
 	local apkm_resp vers v r_vers=()
 	apkm_resp="$(req "https://www.apkmirror.com/uploads/?appcategory=${__APKMIRROR_CAT__}" -)" || return 1
 	vers="$(sed -n 's;.*Version:</span><span class="infoSlide-value">\(.*\) </span>.*;\1;p' <<<"$apkm_resp" | awk '{$1=$1}1')"
-	[[ "$__AAV__" != "false" ]] && { echo "$vers"; return 0; }
+	[[ "$__AAV__" != "false" ]] && { printf '%s\n' "$vers"; return 0; }
 	while IFS= read -r v; do
 		[[ -z "$v" ]] && continue
 		grep -iqE "${v} (beta|alpha)" <<<"$apkm_resp" || r_vers+=("$v")
 	done < <(grep -ivE "(beta|alpha)" <<<"$vers")
-	for v in "${r_vers[@]}"; do echo "$v"; done
+	printf '%s\n' "${r_vers[@]}"
 }
 get_apkmirror_pkg_name() { sed -n 's;.*id=\(.*\)" class="accent_color.*;\1;p' <<<"$__APKMIRROR_RESP__"; }
 get_apkmirror_resp() {
@@ -365,7 +354,7 @@ dl_archive() {
 	req "${url}/${path}" "$output"
 }
 get_archive_vers() { sed 's/^[^-]*-//;s/-\(all\|arm64-v8a\|arm-v7a\)\.apk//g' <<<"$__ARCHIVE_RESP__"; }
-get_archive_pkg_name() { echo "$__ARCHIVE_PKG_NAME__"; }
+get_archive_pkg_name() { printf '%s\n' "$__ARCHIVE_PKG_NAME__"; }
 get_archive_resp() {
 	local r
 	r="$(req "$1" -)"
@@ -394,7 +383,7 @@ check_sig() {
 	grep -q "$pkg_name" sig.txt || return 0
 	sig="$(java -jar --enable-native-access=ALL-UNNAMED "$APKSIGNER" verify --print-certs "$file" | awk '/^Signer.*SHA-256/ {sig=$NF} END {print sig}')"
 	[[ -z "$sig" ]] && return 1
-	echo "$pkg_name signature: ${sig}"
+	printf '%s signature: %s\n' "$pkg_name" "${sig}"
 	grep -qFx "$sig $pkg_name" sig.txt
 }
 build_uni() {
@@ -542,17 +531,16 @@ separate_config() {
 		/^\[/ { in_section = 0 }
 		in_section == 1
 	' "$config")"
-	[[ -z "$content" ]] && { echo "Key '$key' not found in the config file."; return 1; }
+	[[ -z "$content" ]] && { printf "Key '%s' not found in the config file.\n" "$key" >&2; return 1; }
 	if [[ -n "$arch" ]]; then
 		if grep -q '^arch = ' <<<"$content"; then
-			# shellcheck disable=SC2001
 			content="$(sed 's/^arch = .*/arch = "'"$arch"'"/' <<<"$content")"
 		else
 			content+=$'\narch = "'"$arch"'"'
 		fi
 	fi
-	echo "$content" > "$output"
-	echo "Section for '$key' written to $output"
+	printf '%s\n' "$content" > "$output"
+	printf "Section for '%s' written to %s\n" "$key" "$output"
 }
 combine_logs() {
 	local -a logs
@@ -560,8 +548,8 @@ combine_logs() {
 	mapfile -d '' logs < <(find "$dir" -name "build.md" -type f -print0 2>/dev/null | sort -z || true)
 	(( ${#logs[@]} == 0 )) && return 0
 	grep -h "^🟢" "${logs[@]}" 2>/dev/null || true
-	echo ""
-	cat "${logs[@]}" 2>/dev/null | grep -m 1 "^-.*MicroG" && echo ""
+	printf '\n'
+	cat "${logs[@]}" 2>/dev/null | grep -m 1 "^-.*MicroG" && printf '\n'
 
 	local temp
 	temp="$(mktemp)"
@@ -597,5 +585,5 @@ get_matrix() {
 	(( ${#ids[@]} == 0 )) && abort "No apps found for patch source '$source'"
 	local matrix
 	printf -v matrix '%s,' "${ids[@]}"
-	echo "{\"include\":[${matrix%,}]}"
+	printf '{"include":[%s]}\n' "${matrix%,}"
 }
