@@ -141,7 +141,6 @@ get_prebuilts() {
 	done
 	echo
 }
-
 set_prebuilts() {
 	APKSIGNER="${BIN_DIR}/apksigner.jar"
 	HTMLQ="${BIN_DIR}/htmlq"
@@ -221,7 +220,6 @@ get_patch_last_supported_ver() {
 	fi
 	grep -F "($pcount patch" <<<"$op" | sed 's/ (.* patch.*//' | get_highest_ver || return 1
 }
-
 patches_list_versions() {
 	local cli_jar="$1" patches_mpp="$2" pkg_name="$3" op
 	op="$(java -jar "$cli_jar" list-versions "$patches_mpp" -f "$pkg_name" 2>&1)" || { epr "Could not list versions $cli_jar: '$op'"; return 1; }
@@ -387,10 +385,9 @@ get_direct_resp() { __DIRECT_APKNAME__="${1##*/}"; }
 
 patch_apk() {
 	local stock_input="$1" patched_apk="$2" patcher_args="$3" cli_jar="$4" patches_mpp="$5"
-	local cmd="java -jar '$cli_jar' patch '$stock_input' --purge -o '$patched_apk' -p '$patches_mpp' --keystore=ks.keystore \
---keystore-entry-password=r4nD0M.paS4W0rD --keystore-password=r4nD0M.paS4W0rD --signer=krvstek --keystore-entry-alias=krvstek $patcher_args"
-	pr "$cmd"
-	eval "$cmd" && [[ -f "$patched_apk" ]] || { rm -f "$patched_apk"; return 1; }
+	local cmd=(java -jar "$cli_jar" patch "$stock_input" --purge -o "$patched_apk" -p "$patches_mpp" --keystore=ks.keystore --keystore-entry-password=r4nD0M.paS4W0rD --keystore-password=r4nD0M.paS4W0rD --signer=krvstek --keystore-entry-alias=krvstek)
+	pr "${cmd[*]} ${patcher_args[*]}"
+	"${cmd[@]}" "${patcher_args[@]}" && [[ -f "$patched_apk" ]] || { rm -f "$patched_apk"; return 1; }
 }
 check_sig() {
 	local file="$1" pkg_name="$2" sig
@@ -401,7 +398,7 @@ check_sig() {
 	grep -qFx "$sig $pkg_name" sig.txt
 }
 build_uni() {
-	eval "declare -A args=${1#*=}"
+	local -n args="$1"
 	local version="" pkg_name=""
 	local version_mode="${args[version]}"
 	local app_name="${args[app_name]}"

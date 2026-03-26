@@ -3,7 +3,6 @@
 set -euo pipefail
 shopt -s nullglob
 
-# shellcheck disable=SC1091
 source utils.sh
 trap "abort" INT
 [[ "${1-}" == "clean" ]] && { rm -rf "$TEMP_DIR" "$BUILD_DIR"; exit 0; }
@@ -66,7 +65,7 @@ for table_name in $(toml_get_table_names); do
 	cli_src="$(toml_get "$t" cli-source)" || cli_src="$DEF_CLI_SRC"
 	cli_ver="$(toml_get "$t" cli-version)" || cli_ver="$DEF_CLI_VER"
 
-	PREBUILTS="$(get_prebuilts "$cli_src" "$cli_ver" "$patches_src" "$patches_ver")" || abort "could not download prebuilts"
+	PREBUILTS="$(get_prebuilts "$cli_src" "$cli_ver" "$patches_src" "$patches_ver")" || { epr "Could not get prebuilts"; continue; }
 	read -r cli_jar patches_mpp <<<"$PREBUILTS"
 	app_args[cli]="$cli_jar"
 	app_args[ptmpp]="$patches_mpp"
@@ -102,7 +101,7 @@ for table_name in $(toml_get_table_names); do
 		app_args[table]="$table_name (arm64-v8a)"
 		app_args[arch]="arm64-v8a"
 		idx=$((idx + 1))
-		build_uni "$(declare -p app_args)" &
+		build_uni app_args &
 		app_args[table]="$table_name (arm-v7a)"
 		app_args[arch]="arm-v7a"
 		if ((idx >= PARALLEL_JOBS)); then
@@ -110,11 +109,11 @@ for table_name in $(toml_get_table_names); do
 			idx=$((idx - 1))
 		fi
 		idx=$((idx + 1))
-		build_uni "$(declare -p app_args)" &
+		build_uni app_args &
 	else
 		isoneof "${app_args[arch]}" "all" || app_args[table]="${table_name} (${app_args[arch]})"
 		idx=$((idx + 1))
-		build_uni "$(declare -p app_args)" &
+		build_uni app_args &
 	fi
 done
 wait
