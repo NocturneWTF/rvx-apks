@@ -12,7 +12,7 @@ _UA=$(ua)
 export _UA
 
 install_pkg jq
-install_pkg java openjdk-21-jdk
+install_pkg java openjdk-25-jdk
 install_pkg unzip
 
 case "${1-}" in
