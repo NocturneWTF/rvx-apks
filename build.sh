@@ -98,16 +98,16 @@ for table_name in $(toml_get_table_names); do
 		app_args[table]="$table_name (arm64-v8a)"
 		app_args[arch]="arm64-v8a"
 		idx=$((idx + 1))
-		build_uni app_args &
+		build_uni "$(declare -p app_args)" &
 		app_args[table]="$table_name (arm-v7a)"
 		app_args[arch]="arm-v7a"
 		(( idx >= PARALLEL_JOBS )) && { wait -n; (( idx-- )); }
 		idx=$((idx + 1))
-		build_uni app_args &
+		build_uni "$(declare -p app_args)" &
 	else
 		isoneof "${app_args[arch]}" "all" || app_args[table]="${table_name} (${app_args[arch]})"
 		idx=$((idx + 1))
-		build_uni app_args &
+		build_uni "$(declare -p app_args)" &
 	fi
 done
 wait

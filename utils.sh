@@ -109,8 +109,8 @@ get_prebuilts() {
 		if [[ -z "$file" ]]; then
 			local resp name
 			resp="$(gh_req "$uni_rel" -)" || return 1
-			tag_name="$(jq -r '.tag_name' <<<"$resp")"
-			matches="$(jq -e ".assets | map(select(.name | endswith(\".${ext}\")))" <<<"$resp")"
+			tag_name="$(jq -r '.tag_name' <<<"$resp")" || return 1
+			matches="$(jq -e ".assets | map(select(.name | endswith(\".${ext}\")))" <<<"$resp")" || return 1
 			count="$(jq 'length' <<<"$matches")"
 			if (( count > 1 )); then
 				local matches_new
@@ -207,7 +207,7 @@ get_patch_last_supported_ver() {
 		[[ -n "$vers" ]] && { get_highest_ver <<<"$vers"; return 0; }
 	fi
 	op="$(patches_list_versions "$cli_jar" "$patches_mpp" "$pkg_name")" || return 1
-	op="$(awk 'NR>2{$1=$1; print}' <<<"$op")"
+	op="$(awk '/\(.* patch.*/,0 {$1=$1; print}' <<<"$op")"
 	[[ "$op" == "Any" ]] && return 0
 	pcount="$(head -n 1 <<<"$op")" pcount="${pcount#*(}" pcount="${pcount% *}"
 	[[ -n "$pcount" ]] || abort "No patches found for '$pkg_name' in patches '$patches_mpp'"
@@ -374,9 +374,9 @@ get_direct_resp() { __DIRECT_APKNAME__="${1##*/}"; }
 
 patch_apk() {
 	local stock_input="$1" patched_apk="$2" patcher_args="$3" cli_jar="$4" patches_mpp="$5"
-	local cmd=(java -jar "$cli_jar" patch "$stock_input" --purge -o "$patched_apk" -p "$patches_mpp" --keystore=ks.keystore --keystore-entry-password=r4nD0M.paS4W0rD --keystore-password=r4nD0M.paS4W0rD --signer=krvstek --keystore-entry-alias=krvstek)
-	pr "${cmd[*]} ${patcher_args[*]}"
-	"${cmd[@]}" "${patcher_args[@]}" && [[ -f "$patched_apk" ]] || { rm -f "$patched_apk"; return 1; }
+	local cmd="java -jar '$cli_jar' patch '$stock_input' --purge -o '$patched_apk' -p '$patches_mpp' --keystore=ks.keystore --keystore-entry-password=r4nD0M.paS4W0rD --keystore-password=r4nD0M.paS4W0rD --signer=krvstek --keystore-entry-alias=krvstek $patcher_args"
+	pr "$cmd"
+	eval "$cmd" && [[ -f "$patched_apk" ]] || { rm -f "$patched_apk"; return 1; }
 }
 check_sig() {
 	local file="$1" pkg_name="$2" sig
@@ -387,7 +387,7 @@ check_sig() {
 	grep -qFx "$sig $pkg_name" sig.txt
 }
 build_uni() {
-	local -n args="$1"
+	eval "declare -A args=${1#*=}"
 	local version="" pkg_name=""
 	local version_mode="${args[version]}"
 	local app_name="${args[app_name]}"
