@@ -58,7 +58,7 @@ install_pkg() {
 	pr "Installing $pkg..."
 
 	local -a managers=("apt-get:install -y" "dnf:install -y" "yum:install -y" "pacman:-S --noconfirm" "apk:add")
-	local pm args
+	local pm args entry
 	for entry in "${managers[@]}"; do
 		pm="${entry%%:*}"
 		if command -v "$pm" >/dev/null 2>&1; then
@@ -71,7 +71,7 @@ install_pkg() {
 }
 
 get_prebuilts() {
-	local cli_src="$1" cli_ver="$2" patches_src="$3" patches_ver="$4"
+	local cli_src="$1" cli_ver="$2" patches_src="$3" patches_ver="$4" src_ver
 	local cl_dir="${patches_src%/*}"
 	pr "Getting prebuilts (${cl_dir})"
 	cl_dir="${TEMP_DIR}/${cl_dir,,}"
@@ -206,21 +206,20 @@ get_patch_last_supported_ver() {
 		vers="$(awk '{$1=$1}1' <<<"$vers")"
 		[[ -n "$vers" ]] && { get_highest_ver <<<"$vers"; return 0; }
 	fi
-	op="$(patches_list_versions "$cli_jar" "$patches_mpp" "$pkg_name")" || return 1
+	op="$(patches_list "$cli_jar" "$patches_mpp" "$pkg_name" versions)" || return 1
 	[[ "$op" == *"Any"* ]] && return 0
 	op="$(awk '/\(.* patch.*/,0 {$1=$1; print}' <<<"$op")"
 	pcount="$(head -n 1 <<<"$op")" pcount="${pcount#*(}" pcount="${pcount% *}"
 	[[ -n "$pcount" ]] || abort "No patches found for '$pkg_name' in patches '$patches_mpp'"
 	grep -F "($pcount patch" <<<"$op" | sed 's/ (.* patch.*//' | get_highest_ver || return 1
 }
-patches_list_versions() {
-	local cli_jar="$1" patches_mpp="$2" pkg_name="$3" op
-	op="$(java -jar "$cli_jar" list-versions "$patches_mpp" -f "$pkg_name" 2>&1)" || { epr "Could not list versions $cli_jar: '$op'"; return 1; }
-	printf '%s\n' "$op"
-}
 patches_list() {
-	local cli_jar="$1" patches_mpp="$2" pkg_name="$3" op
-	op="$(java -jar "$cli_jar" list-patches --patches "$patches_mpp" -f "$pkg_name" -v -p 2>&1)" || { epr "Could not get patches list $cli_jar: '$op'"; return 1; }
+	local cli_jar="$1" patches_mpp="$2" pkg_name="$3" mode="${4:-patches}" op
+	if [[ "$mode" == "versions" ]]; then
+		op="$(java -jar "$cli_jar" list-versions "$patches_mpp" -f "$pkg_name" 2>&1)" || { epr "Could not list versions $cli_jar: '$op'"; return 1; }
+	else
+		op="$(java -jar "$cli_jar" list-patches --patches "$patches_mpp" -f "$pkg_name" -v -p 2>&1)" || { epr "Could not get patches list $cli_jar: '$op'"; return 1; }
+	fi
 	printf '%s\n' "$op"
 }
 
@@ -235,7 +234,7 @@ isoneof() {
 apkmirror_search() {
 	local resp="$1" dpi="$2" arch="$3" apk_bundle="$4"
 	local -a apparch=(universal noarch 'arm64-v8a + armeabi-v7a')
-	local dlurl="" node
+	local dlurl="" node n lines
 	[[ "$arch" != "all" ]] && apparch=("$arch" "${apparch[@]}")
 	for ((n = 1; n < 40; n++)); do
 		node="$($HTMLQ "div.table-row.headerFont:nth-last-child($n)" -r "span:nth-child(n+3)" <<<"$resp")"
@@ -263,6 +262,7 @@ dl_apkmirror() {
 	node="$($HTMLQ "div.table-row.headerFont:nth-last-child(1)" -r "span:nth-child(n+3)" <<<"$resp")"
 
 	if [[ -n "$node" ]]; then
+		local current_dpi type
 		for current_dpi in $dpi; do
 			for type in APK BUNDLE; do
 				dlurl="$(apkmirror_search "$resp" "$current_dpi" "${arch}" "$type")" || continue
@@ -314,7 +314,7 @@ dl_uptodown() {
 	versionURL="$(jq -e -r '.url + "/" + .extraURL + "/" + (.versionID | tostring)' <<<"$versionURL")"
 	resp="$(req "$versionURL" -)" || return 1
 
-	local data_version files node_arch="" data_file_id node_class file_type
+	local data_version files node_arch="" data_file_id node_class file_type n
 	data_version="$($HTMLQ '.button.variants' --attribute data-version <<<"$resp")" || return 1
 	if [[ -n "$data_version" ]]; then
 		files="$(req "${uptodown_dlurl%/*}/app/${data_code}/version/${data_version}/files" - | jq -e -r .content)" || return 1
@@ -402,7 +402,7 @@ build_uni() {
 	[[ -n "${args[included_patches]}" ]] && p_patcher_args+=("$(join_args "${args[included_patches]}" -e)")
 	[[ "${args[exclusive_patches]}" == "true" ]] && p_patcher_args+=("--exclusive")
 
-	local tried_dl=()
+	local tried_dl=() dl_p
 	for dl_p in "${DL_SRCS[@]}"; do
 		local p_url="${args[${dl_p}_dlurl]}"
 		[[ -z "$p_url" ]] && continue
@@ -435,6 +435,7 @@ build_uni() {
 	if [[ "$get_latest_ver" == "true" ]]; then
 		__AAV__="false"
 		[[ "$version_mode" == "beta" ]] && __AAV__="true"
+		local pkgvers
 		pkgvers="$(get_"${dl_from}"_vers)"
 		version="$(get_highest_ver <<<"$pkgvers")" || version="$(head -n 1 <<<"$pkgvers")"
 	fi
@@ -463,6 +464,7 @@ build_uni() {
 			return 0
 		fi
 	fi
+	local OP
 	if [[ -f "${stock_apk}.apkm" ]]; then
 		local tmp_base
 		tmp_base="$(mktemp --suffix=.apk)"
@@ -481,7 +483,7 @@ build_uni() {
 	fi
 	log "🟢 » ${table}: \`${version}\`"
 
-	local microg_patch disable_psu_patch
+	local microg_patch disable_psu_patch _auto_patch
 	microg_patch="$(grep -iE "^Name: .*(gmscore|microg)" <<<"$list_patches" || :)"; microg_patch="${microg_patch#*: }"
 	disable_psu_patch="$(grep -i "^Name: .*disable play store updates" <<<"$list_patches" || :)"; disable_psu_patch="${disable_psu_patch#*: }"
 	for _auto_patch in "$microg_patch" "$disable_psu_patch"; do
@@ -502,6 +504,7 @@ build_uni() {
 	done
 	patched_apk="${TEMP_DIR}/${app_name_l}-${brand_f}-${version_f}-${arch_f}.apk"
 
+	local libs
 	case "$arch" in
 		"arm-v7a") libs="armeabi-v7a" ;;
 		"arm64-v8a"|"x86"|"x86_64") libs="$arch" ;;
@@ -566,7 +569,7 @@ get_matrix() {
 	def_brand="$(toml_get "$main_t" brand)" || def_brand="Morphe"
 
 	local -a ids=()
-	local sourcel="${source,,}"
+	local table sourcel="${source,,}"
 	while IFS= read -r table; do
 		local table_t brand arch
 		table_t="$(toml_get_table "$table")"
