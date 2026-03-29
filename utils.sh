@@ -207,8 +207,8 @@ get_patch_last_supported_ver() {
 		[[ -n "$vers" ]] && { get_highest_ver <<<"$vers"; return 0; }
 	fi
 	op="$(patches_list_versions "$cli_jar" "$patches_mpp" "$pkg_name")" || return 1
+	[[ "$op" == *"Any"* ]] && return 0
 	op="$(awk '/\(.* patch.*/,0 {$1=$1; print}' <<<"$op")"
-	[[ "$op" == "Any" ]] && return 0
 	pcount="$(head -n 1 <<<"$op")" pcount="${pcount#*(}" pcount="${pcount% *}"
 	[[ -n "$pcount" ]] || abort "No patches found for '$pkg_name' in patches '$patches_mpp'"
 	grep -F "($pcount patch" <<<"$op" | sed 's/ (.* patch.*//' | get_highest_ver || return 1
