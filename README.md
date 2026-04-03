@@ -3,8 +3,7 @@
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/krvstek/uni-apks/build.yml?style=flat-square&logo=githubactions&logoColor=%23FFFFFF&label=Build%20Status&color=%234500FF)](https://github.com/krvstek/uni-apks/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/release-date/krvstek/uni-apks?display_date=created_at&style=flat-square&logo=android&logoColor=%23FFFFFF&label=Release&color=%234500FF)](https://github.com/krvstek/uni-apks/releases/latest)
-[![Pre-release](https://img.shields.io/github/release-date-pre/krvstek/uni-apks?display_date=created_at&style=flat-square&logo=androidstudio&logoColor=%23FFFFFF&label=Pre-release&color=%234500FF)](https://github.com/krvstek/uni-apks/releases)
-[![Downloads](https://img.shields.io/github/downloads/krvstek/uni-apks/total?style=flat-square&logo=simpleanalytics&logoColor=%23FFFFFF&label=Downloads&color=%234500FF)](https://github.com/krvstek/uni-apks#-list-of-apps-in-this-repository)
+[![Views](https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fkrvstek%2Funi-apks&label=Views&icon=eye-fill&color=%234500ff&message=&style=flat-square&tz=Europe%2FWarsaw)](https://github.com/krvstek/uni-apks#-list-of-apps-in-this-repository)
 
 Here you can download and use applications selected for this repository, which are modified and extended with many functionalities that will certainly be useful to you.
 </div>
