@@ -233,16 +233,20 @@ isoneof() {
 # -------------------- apkmirror --------------------
 apkmirror_search() {
 	local resp="$1" dpi="$2" arch="$3" apk_bundle="$4"
-	local -a apparch=(universal noarch 'arm64-v8a + armeabi-v7a')
 	local dlurl="" node n lines
-	[[ "$arch" != "all" ]] && apparch=("$arch" "${apparch[@]}")
+
+	local -a apparch=('universal' 'noarch' 'arm64-v8a + armeabi-v7a')
+	[[ "$arch" != "all" ]] && apparch+=("$arch")
+	local -a appdpi=("nodpi" "anydpi" "120-640dpi")
+	[[ "$dpi" != "" ]] && appdpi+=("$dpi")
+
 	for ((n = 1; n < 40; n++)); do
 		node="$($HTMLQ "div.table-row.headerFont:nth-last-child($n)" -r "span:nth-child(n+3)" <<<"$resp")"
 		[[ -z "$node" ]] && break
 		dlurl="$($HTMLQ --base https://www.apkmirror.com --attribute href "div.table-cell:nth-child(1) > a:nth-child(1)" <<<"$node")"
 		[[ -z "$dlurl" ]] && break
 		mapfile -t lines <<<"$($HTMLQ --text --ignore-whitespace <<<"$node")"
-		if [[ "${lines[2]}" == "$apk_bundle" && "${lines[5]}" == "$dpi" ]] && isoneof "${lines[3]}" "${apparch[@]}"; then
+		if [[ "${lines[2]}" == "$apk_bundle" ]] && isoneof "${lines[5]}" "${appdpi[@]}" && isoneof "${lines[3]}" "${apparch[@]}"; then
 			printf '%s\n' "$dlurl"
 			return 0
 		fi
@@ -262,13 +266,11 @@ dl_apkmirror() {
 	node="$($HTMLQ "div.table-row.headerFont:nth-last-child(1)" -r "span:nth-child(n+3)" <<<"$resp")"
 
 	if [[ -n "$node" ]]; then
-		local current_dpi type
-		for current_dpi in $dpi; do
-			for type in APK BUNDLE; do
-				dlurl="$(apkmirror_search "$resp" "$current_dpi" "${arch}" "$type")" || continue
-				[[ "$type" == "BUNDLE" ]] && is_bundle="true"
-				break 2
-			done
+		local type
+		for type in APK BUNDLE; do
+			dlurl="$(apkmirror_search "$resp" "$dpi" "${arch}" "$type")" || continue
+			[[ "$type" == "BUNDLE" ]] && is_bundle="true"
+			break 2
 		done
 		[[ -z "$dlurl" ]] && return 1
 		resp="$(req "$dlurl" -)"
@@ -298,9 +300,10 @@ get_apkmirror_resp() {
 # -------------------- uptodown --------------------
 dl_uptodown() {
 	local uptodown_dlurl="$1" version="$2" output="$3" arch="$4" _dpi="$5" is_bundle="false" suffix=""
-	local -a apparch=('arm64-v8a, armeabi-v7a, x86_64' 'arm64-v8a, armeabi-v7a, x86, x86_64' 'arm64-v8a, armeabi-v7a')
+
 	[[ "$arch" == "arm-v7a" ]] && arch="armeabi-v7a"
-	[[ "$arch" != "all" ]] && apparch=("$arch" "${apparch[@]}")
+	local -a apparch=('arm64-v8a, armeabi-v7a, x86_64' 'arm64-v8a, armeabi-v7a, x86, x86_64' 'arm64-v8a, armeabi-v7a')
+	[[ "$arch" != "all" ]] && apparch+=("$arch")
 
 	local i op resp data_code versionURL=""
 	data_code="$($HTMLQ "#detail-app-name" --attribute data-code <<<"$__UPTODOWN_RESP__")" || return 1
@@ -364,7 +367,7 @@ get_archive_resp() {
 }
 # -------------------- direct --------------------
 dl_direct() {
-	local url="$1" version="${2// /-}" output="$3" arch="$4" dpi="$5"
+	local url="$1" version="${2// /-}" output="$3" arch="$4"
 	req "$url" "${output}" || return 1
 }
 get_direct_vers() { cut -d- -f2 <<<"$__DIRECT_APKNAME__"; }
