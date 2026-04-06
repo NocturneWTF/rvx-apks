@@ -31,9 +31,9 @@ Here you can download and use applications selected for this repository, which a
 
 | 📦 Name | 💎 Obtainium |
 |:-------:|:------------:|
-| <picture><img src="https://play-lh.googleusercontent.com/6am0i3walYwNLc08QOOhRJttQENNGkhlKajXSERf3JnPVRQczIyxw2w3DxeMRTOSdsY=s48-rw" width="20" height="20"></picture> [`YouTube`](https://play.google.com/store/apps/details?id=com.google.android.youtube) | [![Obtainium](https://img.shields.io/badge/Import-Config-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][yt-morphe] |
-| <picture><img src="https://play-lh.googleusercontent.com/zD8UA5CRdiPzbvTwGKtzR4KjQpxqEK6X0tGDpzEaOo0xPEvG6HUiC_0qkpTfzpuMTqU=s48-rw" width="20" height="20"></picture> [`YouTube Music`](https://play.google.com/store/apps/details?id=com.google.android.apps.youtube.music) | [![Obtainium](https://img.shields.io/badge/Import-Config-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][music-morphe] |
-| <picture><img src="https://play-lh.googleusercontent.com/NaFAbO7ExS4NRAvt2GYkNY6OQf9oVXwmdMTZzA6zrgjjSxhQuTCnjHyf7TgYcoSGqQ=s48-rw" width="20" height="20"></picture> [`Reddit`](https://play.google.com/store/apps/details?id=com.reddit.frontpage) | [![Obtainium](https://img.shields.io/badge/Import-Config-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][reddit-morphe] |
+| [![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=flat-square&logo=youtube&logoColor=%23FFFFFF)](https://play.google.com/store/apps/details?id=com.google.android.youtube) | [![Obtainium](https://img.shields.io/badge/Import-Config-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][yt-morphe] |
+| [![YouTube Music](https://img.shields.io/badge/YouTube%20Music-FF0000?style=flat-square&logo=youtubemusic&logoColor=%23FFFFFF)](https://play.google.com/store/apps/details?id=com.google.android.apps.youtube.music) | [![Obtainium](https://img.shields.io/badge/Import-Config-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][music-morphe] |
+| [![Reddit](https://img.shields.io/badge/Reddit-FF4500?style=flat-square&logo=reddit&logoColor=%23FFFFFF)](https://play.google.com/store/apps/details?id=com.reddit.frontpage) | [![Obtainium](https://img.shields.io/badge/Import-Config-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][reddit-morphe] |
 </details>
 
 ### [🧩 `Piko`](https://github.com/crimera/piko) [![Static Badge](https://img.shields.io/badge/All-Releases-4500FF?style=flat-square&logo=android&logoColor=%23FFFFFF)](https://github.com/krvstek/uni-apks/releases?q=-piko&expanded=true)
@@ -41,8 +41,7 @@ Here you can download and use applications selected for this repository, which a
 
 | 📦 Name | 💎 Obtainium |
 |:-------:|:------------:|
-| <picture><img src="https://play-lh.googleusercontent.com/XyI6Hyz9AFg7E_joVzX2zh6CpWm9B2DG2JuEz5meCFVm4-wTKTnHgqbmg62iFKe4Gzca=s48-rw" width="20" height="20"></picture> [`X`](https://play.google.com/store/apps/details?id=com.twitter.android) | [![Obtainium](https://img.shields.io/badge/Import-Config-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][x-piko] |
-| <picture><img src="https://external-preview.redd.it/twitter-9-98-0-release-0-by-x-corp-v0-9NCiCgErgeX7B_XiRR0A2-uvFAXUbtXpdYzBF8o8nv0.jpg?auto=webp&s=1b54bcc90adda29c34aa8f8ddf1dc9c4ebb6fe80" width="20" height="20"></picture> [`X (Twitter branding)`](https://play.google.com/store/apps/details?id=com.twitter.android) | [![Obtainium](https://img.shields.io/badge/Import-Config-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][twitter-piko] |
+| [![X / Twitter](https://img.shields.io/badge/X%20%2F%20Twitter-000000?style=flat-square&logo=x&logoColor=%23FFFFFF)](https://play.google.com/store/apps/details?id=com.twitter.android) | [![Obtainium](https://img.shields.io/badge/Import%20Config-(X%20branding)-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][x-piko]<br>[![Obtainium](https://img.shields.io/badge/Import%20Config-(Twitter%20branding)-4500FF?style=flat-square&logo=obtainium&logoColor=%23FFFFFF)][twitter-piko] |
 </details>
 
 ## ⚠️ Disclaimer
