@@ -63,12 +63,19 @@ jobs:
           ./build.sh separate-config config.toml ${{ matrix.id }} sep_config.toml ${{ matrix.arch }}
           cat sep_config.toml
 
+      - name: Prepare Keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ks.keystore
+          fi
+
       - name: Build APKs
         run: ./build.sh sep_config.toml
         env:
           BUILD_MODE: ${{ inputs.build_mode }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: $GITHUB_REPOSITORY
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
 
       - name: Upload APKs as artifact
         uses: actions/upload-artifact@v7

@@ -377,7 +377,14 @@ get_direct_resp() { __DIRECT_APKNAME__="${1##*/}"; }
 
 patch_apk() {
 	local stock_input="$1" patched_apk="$2" patcher_args="$3" cli_jar="$4" patches_mpp="$5"
-	local cmd="java -jar '$cli_jar' patch '$stock_input' --purge -o '$patched_apk' -p '$patches_mpp' --keystore=ks.keystore --keystore-entry-password=r4nD0M.paS4W0rD --keystore-password=r4nD0M.paS4W0rD --signer=krvstek --keystore-entry-alias=krvstek $patcher_args"
+	local cmd="java -jar '$cli_jar' patch '$stock_input' --purge -o '$patched_apk' -p '$patches_mpp'"
+	local ks_pass="${KEYSTORE_PASS:-}"
+	if [[ -n "$ks_pass" ]]; then
+		cmd+=" --keystore=ks.keystore --keystore-entry-password='${ks_pass}' --keystore-password='${ks_pass}' --signer=krvstek --keystore-entry-alias=krvstek"
+	elif [[ -f "morphe.keystore" ]]; then
+		cmd+=" --keystore=morphe.keystore --keystore-entry-password=Morphe --signer=Morphe --keystore-entry-alias=Morphe"
+	fi
+	cmd+=" $patcher_args"
 	pr "$cmd"
 	eval "$cmd" && [[ -f "$patched_apk" ]] || { rm -f "$patched_apk"; return 1; }
 }
