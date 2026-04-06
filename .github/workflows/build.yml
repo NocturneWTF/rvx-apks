@@ -19,7 +19,8 @@ on:
           - morphe
           - piko
 
-permissions: write-all
+permissions:
+  contents: read
 
 jobs:
   prepare:
@@ -97,6 +98,8 @@ jobs:
     needs: run
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
