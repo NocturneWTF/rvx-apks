@@ -152,15 +152,22 @@ jobs:
           ./build.sh combine-logs logs >> "$GITHUB_OUTPUT"
           echo "${DELIM}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload APKs to release
+      - name: Upload release
         if: steps.check_artifacts.outputs.has_artifacts == 'true'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          body: ${{ steps.get_output.outputs.BUILD_LOG }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: all-apks/*.apk
-          release_name: ${{ steps.version.outputs.version }}
-          tag: ${{ steps.version.outputs.version }}
-          prerelease: ${{ inputs.build_mode == 'dev' }}
-          file_glob: true
-          overwrite: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.version }}
+          BODY: ${{ steps.get_output.outputs.BUILD_LOG }}
+          IS_PRERELEASE: ${{ inputs.build_mode == 'dev' }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "$IS_PRERELEASE" == "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes "$BODY" $PRERELEASE_FLAG
+            gh release upload "$TAG" all-apks/*.apk --clobber
+          else
+            gh release create "$TAG" all-apks/*.apk --title "$TAG" --notes "$BODY" $PRERELEASE_FLAG
+          fi
