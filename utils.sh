@@ -352,11 +352,13 @@ get_uptodown_resp() {
 
 # -------------------- archive --------------------
 dl_archive() {
-	local url="$1" version="${2// /}" output="$3" arch="${4// /}" path
+	local url="$1" version="${2// /}" output="$3" arch="${4// /}" path is_bundle="false" suffix=""
 	path="$(grep "${version#v}-${arch}" <<<"$__ARCHIVE_RESP__")" || return 1
-	req "${url}/${path}" "$output"
+	[[ "$path" =~ \.(apkm|xapk)$ ]] && is_bundle="true"
+	[[ "$is_bundle" == "true" ]] && suffix=".apkm"
+	req "${url}/${path}" "${output}${suffix}"
 }
-get_archive_vers() { sed 's/^[^-]*-//;s/-\(all\|arm64-v8a\|arm-v7a\)\.apk//g' <<<"$__ARCHIVE_RESP__"; }
+get_archive_vers() { sed 's/^[^-]*-//;s/-\(all\|arm64-v8a\|arm-v7a\)\.\(apk\|apkm\|xapk\)//g' <<<"$__ARCHIVE_RESP__"; }
 get_archive_pkg_name() { printf '%s\n' "$__ARCHIVE_PKG_NAME__"; }
 get_archive_resp() {
 	local r
