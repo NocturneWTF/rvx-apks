@@ -256,9 +256,8 @@ apkmirror_search() {
 }
 dl_apkmirror() {
 	local url="$1" version="${2// /-}" output="$3" arch="$4" dpi="$5" is_bundle="false" suffix=""
-	[[ -f "${output}.apkm" ]] && { req "$url" "${output}.apkm"; return; }
-	[[ "$arch" == "arm-v7a" ]] && arch="armeabi-v7a"
 
+	[[ "$arch" == "arm-v7a" ]] && arch="armeabi-v7a"
 	local resp node apkmname dlurl=""
 	apkmname="$($HTMLQ "h1.marginZero" --text <<<"$__APKMIRROR_RESP__" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-')"
 	url="${url%/}/${apkmname}-${version//./-}-release/"
@@ -353,10 +352,11 @@ get_uptodown_resp() {
 # -------------------- archive --------------------
 dl_archive() {
 	local url="$1" version="${2// /}" output="$3" arch="${4// /}" path is_bundle="false" suffix=""
-	path="$(grep "${version#v}-${arch}" <<<"$__ARCHIVE_RESP__")" || return 1
-	[[ "$path" =~ \.(apkm|xapk)$ ]] && is_bundle="true"
+
+	path="$(grep -m1 "${version#v}-${arch}" <<<"$__ARCHIVE_RESP__")" || return 1
+	[[ "$path" == *.apkm || "$path" == *.xapk ]] && is_bundle="true"
 	[[ "$is_bundle" == "true" ]] && suffix=".apkm"
-	req "${url}/${path}" "${output}${suffix}"
+	req "${url}/${path}" "${output}${suffix}" || return 1
 }
 get_archive_vers() { sed 's/^[^-]*-//;s/-\(all\|arm64-v8a\|arm-v7a\)\.\(apk\|apkm\|xapk\)//g' <<<"$__ARCHIVE_RESP__"; }
 get_archive_pkg_name() { printf '%s\n' "$__ARCHIVE_PKG_NAME__"; }
@@ -476,23 +476,24 @@ build_uni() {
 			return 0
 		fi
 	fi
-	local OP
+	local sig_check_apk sig_op tmp_base=""
 	if [[ -f "${stock_apk}.apkm" ]]; then
-		local tmp_base
-		tmp_base="$(mktemp --suffix=.apk)"
-		if ! unzip -p "${stock_apk}.apkm" base.apk > "$tmp_base" 2>/dev/null || [[ ! -s "$tmp_base" ]]; then
-			unzip -p "${stock_apk}.apkm" "${pkg_name}.apk" > "$tmp_base" 2>/dev/null
+		tmp_base="$(mktemp -d -p "$TEMP_DIR")"
+		if unzip -j "${stock_apk}.apkm" base.apk -d "$tmp_base" >/dev/null 2>&1; then
+			sig_check_apk="${tmp_base}/base.apk"
+		else
+			unzip -j "${stock_apk}.apkm" "${pkg_name}.apk" -d "$tmp_base" >/dev/null 2>&1
+			sig_check_apk="${tmp_base}/${pkg_name}.apk"
 		fi
-		if [[ -s "$tmp_base" ]] && ! OP="$(check_sig "$tmp_base" "$pkg_name" 2>&1)"; then
-			rm -f "$tmp_base"
-			epr "Not building $table, apk signature mismatch in bundle '$stock_apk': $OP"
-			return 0
-		fi
-		rm -f "$tmp_base"
-	elif ! OP="$(check_sig "$stock_apk" "$pkg_name" 2>&1)" && ! grep -qFx "ERROR: Missing META-INF/MANIFEST.MF" <<<"$OP"; then
-		epr "Not building $table, apk signature mismatch '$stock_apk': $OP"
+	else
+		sig_check_apk="${stock_apk}"
+	fi
+	if ! sig_op="$(check_sig "$sig_check_apk" "$pkg_name" 2>&1)"; then
+		[[ -n "$tmp_base" ]] && rm -rf "$tmp_base"
+		epr "Not building $table, apk signature mismatch '$stock_apk': $sig_op"
 		return 0
 	fi
+	[[ -n "$tmp_base" ]] && rm -rf "$tmp_base"
 	log "🟢 » ${table}: \`${version}\`"
 
 	local microg_patch disable_psu_patch _auto_patch
